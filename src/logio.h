@@ -19,33 +19,41 @@
 #define LOGIO_H
 
 #include <stdio.h>
+#include <pthread.h>
+#include <time.h>
 
 #define VISIBLE 0
 #define INVISIBLE 1
 
 typedef struct {
-    const char *version;
-    char *argv[]; // 将 argv 放在结构体的末尾
-} logini;
+    char *version;
+    char *argv[100];
+} LogInfo;
 
-// 全局变量定义
-extern clock_t start, end;
-extern int if_write_head;
-extern int if_write_end;
+typedef struct {
+    const char *timeformat;
+    const char *FoldName;
+    const char *filename;
+    const char *program_name;
+    char *version;
+    int argc;
+    char **argv;
+} LogInitParams;
+
+// 全局变量声明
+extern clock_t start;
+extern clock_t end;
 extern int logentry;
 extern FILE *stream;
-extern pthread_mutex_t mutex;  // 添加互斥锁声明
+extern pthread_mutex_t mutex;
+extern LogInfo global_log_info;
+extern int if_write_head;
+extern int if_write_end;
 
-// 日志初始化函数
-logini log_ini(const char *timeformat, const char *FoldName, const char *filename, const char *program_name, const char *version, int argc, char **argv);
-
-// 日志打印函数
-void logprint(int visible, const char *signals, const char *fmtf, ...);
-
-// 日志调试模式
+// 函数声明
+LogInfo log_ini(LogInitParams params);
+void logprint(int visible, const char *signals, const char *fmt, ...);
 void logBUG();
-
-// 日志结束
 void logexit(int status);
 
 #endif // LOGIO_H
