@@ -1,1 +1,1 @@
-# logio
+# LOG Information Output (logio)
