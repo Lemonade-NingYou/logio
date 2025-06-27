@@ -1,3 +1,20 @@
+/*
+ * Copyright (C) 2025 lemonade_NingYou
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+ 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,7 +24,7 @@
 #include "logio.h"
 
 LogInfo loginfo;
-
+LogInitParams Loginfo;
 static char *bortok[] = {
 	"Welcome to our sister log system - Microsoft",
 	"Happy birthday! If today is your birthday",
@@ -61,7 +78,7 @@ void logprint(int visible, const char *mode, const char *fmt, ...) {
         pthread_mutex_unlock(&mutex);// 互斥锁解锁
         exit(EXIT_FAILURE);
     }
-
+    
     time_t now = time(NULL);
     struct tm *tm = localtime(&now);
     char timetic[128];
@@ -87,25 +104,22 @@ void logprint(int visible, const char *mode, const char *fmt, ...) {
         vfprintf(stdout, fmt, args);
         va_end(args);
     }
-
+   
     // 日志级别处理
-    if (strcmp(mode, "i") == 0) {
-        fprintf(stream, "[%s][INFO] ", timetic);
-        ++logentry;
-    } else if (strcmp(mode, "w") == 0) {
-        fprintf(stream, "[%s][WARN] ", timetic);
-        ++logentry;
-    } else if (strcmp(mode, "e") == 0) {
-        fprintf(stream, "[%s][ERROR] ", timetic);
-        ++logentry;
-    } else if (strcmp(mode, "f") == 0) {
-        fprintf(stream, "[%s][FATAL] ", timetic);
-        ++logentry;
-    } else {
-        // 非法模式时输出警告并跳过内容写入
-        fprintf(stream, "[UNKNOWN/%s] ", timetic);
-        ++logentry;
+    const char *level = "UNKNOWN"; // 默认级别
+    if (mode[0] != '\0' && mode[1] == '\0') 
+    { // 确保 mode 是单字符
+    	switch (mode[0]) 
+   	 { // 用 switch 替代多次 strcmp
+    		case 'e': level = "ERROR"; break;
+    		case 'f': level = "FATAL"; break;
+    		case 'i': level = "INFO";  break;
+       	 case 'w': level = "WARN";  break;
+   	 }
     }
+    // 统一输出（减少重复的 fprintf 和 logentry++）
+    fprintf(stream, "[%s][%s/%s] ", timetic, level, Loginfo.program_name);
+    ++logentry;
 
     // 内容写入
     va_list args;

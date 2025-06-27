@@ -24,6 +24,7 @@
 
 #define VISIBLE 0
 #define INVISIBLE 1
+#define CHARSTRANGMAX 4096 // char strang max
 
 typedef struct {
     char *version;
