@@ -114,7 +114,7 @@ void logprint(int visible, const char *mode, const char *fmt, ...) {
     		case 'e': level = "ERROR"; break;
     		case 'f': level = "FATAL"; break;
     		case 'i': level = "INFO";  break;
-       	 case 'w': level = "WARN";  break;
+            case 'w': level = "WARN";  break;
    	 }
     }
     // 统一输出（减少重复的 fprintf 和 logentry++）

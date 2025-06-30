@@ -1,0 +1,21 @@
+============================================================
+= Application log- ./test
+= Version number: N/A
+= Operating Environment: Linux 5.10.136-gadc608b28b46-dirty (aarch64)
+= Startup parameters:
+= Start time: 2025-06-30 15:05:16
+= Welcome to our sister log system - Microsoft
+============================================================
+[2025-06-30 15:05:16][INFO] This is an info message.
+[2025-06-30 15:05:16][WARN] This is a warning message.
+[2025-06-30 15:05:16][ERROR] This is an error message.
+[2025-06-30 15:05:16][FATAL] This is a fatal message.
+[2025-06-30 15:05:16][INFO] This is an invisible message.
+============================================================
+= End of log- 
+= Exit time: 2025-06-30 15:05:16
+= Running time: 0.000429
+= Log entry: 5
+= Exit status: 0
+= Peak memory(MB): 
+============================================================
