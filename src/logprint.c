@@ -126,6 +126,6 @@ void logprint(int visible, const char *mode, const char *fmt, ...) {
     va_start(args, fmt);
     vfprintf(stream, fmt, args);
     va_end(args);
-    fflush(stream);
+    fflush(stream); // 清理流
     pthread_mutex_unlock(&mutex);// 互斥锁解锁
 }
