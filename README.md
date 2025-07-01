@@ -17,7 +17,14 @@
 ## download
 
 - use command `git clone https://github.com/Lemonade-NingYou/logio.git` to download
-- make it (she dead and no use)
+- `make` it 
+
+# Support
+- [x] GNU/linux
+- [ ] Windows
+- [ ] MacOS
+- [x] Android
+- [x] termux
 
 ## author
 - If you think it not useful you can call this e-mail: `lemonade_ningyou126.com`
