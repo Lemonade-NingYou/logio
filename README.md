@@ -5,7 +5,7 @@
 - This project helps you keep a log more easily
 
 ## How to use it
-- `LogInfo log_ini(LogInitParams params)` (log initialization, you must put it first, see [logio.h](src/logio.h))
+- `LogInfo log_ini(LogInitParams params)` (log initialization, you must put it first)
 - `void logprint(invisible, const char *signals, const char *fmt, ...)` (use it like fprintf function)
 - `void logexit(int status)` (exit function, it is very safety)
 - `void logBUG() ` (somebody not write it)
