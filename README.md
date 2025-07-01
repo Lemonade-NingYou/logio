@@ -8,7 +8,7 @@
 - `LogInfo log_ini(LogInitParams params)` (log initialization, you must put it first)
 - `void logprint(invisible, const char *signals, const char *fmt, ...)` (use it like fprintf function)
 - `void logexit(int status)` (exit function, it is very safety)
-- `void logBUG() ` (somebody not write it)
+- `void logBUG() ` (somebody not write it, f**k you cat)
 - how to use :
   - You can see [text.c](src/text.c)
 ## download
