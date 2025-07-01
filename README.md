@@ -13,7 +13,7 @@
   - You can see [test.c](src/test.c)
 
 ## Support
-[x] Linux 
+- [x] Linux 
 ## download
 
 - use command `git clone https://github.com/Lemonade-NingYou/logio.git` to download
