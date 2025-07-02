@@ -36,7 +36,7 @@ int main(int argc, char **argv)
     logprint(VISIBLE, "w", "This is a warning message.\n");
     logprint(VISIBLE, "e", "This is an error message.\n");
     logprint(VISIBLE, "f", "This is a fatal message.\n");
-    // 测试不可见的消息打
+    // 测试不可见的消息打印
     logprint(INVISIBLE, "i", "This is an invisible message.\n");
     printf("Log printing succeeded.\n");
 
