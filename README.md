@@ -29,18 +29,18 @@ int main(int argc, char **argv)
 
     LogInfo loginfo = log_ini(params);
 
-    // 测试日志打印
+    // test log print
     printf("Testing log printing...\n");
-    // 打印不同类型的消息
+    // print different type information
     logprint(VISIBLE, "i", "This is an info message.\n");
     logprint(VISIBLE, "w", "This is a warning message.\n");
     logprint(VISIBLE, "e", "This is an error message.\n");
     logprint(VISIBLE, "f", "This is a fatal message.\n");
-    // 测试不可见的消息打印
+    // test invisible information print
     logprint(INVISIBLE, "i", "This is an invisible message.\n");
     printf("Log printing succeeded.\n");
 
-    // 测试日志退出
+    // test log exit
     printf("Testing log exit...\n");
     logexit(EXIT_SUCCESS);
 }
