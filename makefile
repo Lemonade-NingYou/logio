@@ -11,7 +11,7 @@ LIB_NAME := logio
 TARGET  := $(BIN_DIR)/lib$(LIB_NAME).so
 
 # 源文件和中间文件
-SRCS := $(SRC_DIR)/logio.c
+SRCS := $(wildcard $(SRC_DIR)/*.c)
 OBJS := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRCS))
 
 # 默认目标：创建目录并编译
