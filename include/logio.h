@@ -18,6 +18,11 @@
 #ifndef LOGIO_H
 #define LOGIO_H
 
+       
+#ifdef __cplusplus
+extern "C" {
+#endif
+    
 #include <stdio.h>
 #include <pthread.h>
 #include <time.h>
@@ -56,5 +61,9 @@ LogInfo log_ini(LogInitParams params);
 void logprint(int visible, const char *signals, const char *fmt, ...);
 void logBUG();
 void logexit(int status);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // LOGIO_H
