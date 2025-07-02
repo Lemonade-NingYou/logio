@@ -11,9 +11,7 @@
 - `void logBUG() ` somebody not write it, f**k you cat
 - how to use :
   - You can see [test.c](src/test.c)
-
-## Support
-- [x] Linux 
+ 
 ## download
 
 - use command `git clone https://github.com/Lemonade-NingYou/logio.git` to download
