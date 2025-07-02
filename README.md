@@ -47,16 +47,28 @@ int main(int argc, char **argv)
 ```
  
 ## download
-
 - use command `git clone https://github.com/Lemonade-NingYou/logio.git` to download
-- `make` it 
 
-# Support
-- [x] GNU/linux
+## Support
+- [x] GNU/Linux
 - [ ] Windows
 - [ ] MacOS
 - [x] Android
 - [x] termux
+## About makefile
+- if you are GNU/Linux user, you shouldn't change makefile
+- if you are termux user ,you should change
+```
+# 安装目录
+INSTALL_LIB_DIR := /usr/local/lib
+INSTALL_INCLUDE_DIR := /usr/local/include
+```
+to  
+```
+# 安装目录
+INSTALL_LIB_DIR := data/data/com.termux/files/usr/lib
+INSTALL_INCLUDE_DIR := data/data/com.termux/files/usr/include
+```
 
 ## author
 - If you think it not useful you can call this e-mail: `lemonade_ningyou126.com`
