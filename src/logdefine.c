@@ -1,4 +1,4 @@
-#include "logio.h"
+#include "../include/logio.h"
 
 // 全局变量定义
 clock_t start = 0;

@@ -1,5 +1,5 @@
 # 编译器设置
-CC      := clang
+CC      := gcc
 CFLAGS  := -Wall -Wextra -fPIC -O2
 LDFLAGS := -shared
 

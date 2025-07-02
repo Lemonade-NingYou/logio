@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <pthread.h>
-#include "logio.h"
+#include "../include/logio.h"
 
 // 日志尾信息输出函数
 // 参数：

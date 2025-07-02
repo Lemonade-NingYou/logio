@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <string.h>
-#include "logio.h"
+#include "../include/logio.h"
 
 static void* thread_function(void* arg) {
     return NULL;

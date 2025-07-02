@@ -3,7 +3,7 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/stat.h>
-#include "logio.h"
+#include "../include/logio.h"
 
 static int create_directory(const char *dir)
 {

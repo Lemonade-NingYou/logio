@@ -21,7 +21,7 @@
 #include <time.h>
 #include <stdarg.h>
 #include <sys/utsname.h>
-#include "logio.h"
+#include "../include/logio.h"
 
 LogInfo loginfo;
 LogInitParams Loginfo;
@@ -39,8 +39,7 @@ static int loghead(int ifwrite,char *fmt) {
         srand(time(NULL));
         
         fprintf(stream, "============================================================\n");
-        fprintf(stream, "= Application log- %s\n", 
-                (global_log_info.argv[0] == NULL) ? "N/A" : global_log_info.argv[0]);
+        fprintf(stream, "= Application log- %s\n", (global_log_info.argv[0] == NULL) ? "N/A" : global_log_info.argv[0]);
         // 输出版本号信息
         fprintf(stream, "= Version number: %s\n", (loginfo.version == NULL)?"N/A":loginfo.version);
 
@@ -117,8 +116,9 @@ void logprint(int visible, const char *mode, const char *fmt, ...) {
             case 'w': level = "WARN";  break;
    	 }
     }
+
     // 统一输出（减少重复的 fprintf 和 logentry++）
-    fprintf(stream, "[%s][%s/%s] ", timetic, level, Loginfo.program_name);
+    fprintf(stream, "[%s][%s/%s] ", timetic, level, (global_log_info.argv[0] == NULL) ? "N/A" : global_log_info.argv[0]);
     ++logentry;
 
     // 内容写入

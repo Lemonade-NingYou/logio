@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include "logio.h"
+#include "../include/logio.h"
 
 int main(int argc, char **argv) {
     LogInitParams params = {
