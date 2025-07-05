@@ -169,7 +169,7 @@ static void* thread_function(void* arg) {
 }
 
 // 开始内存检测，但不输出任何信息，直到调用 logexit
-void logBUG() {
+void logdebug() {
     pthread_t thread_id;
     int ret = pthread_create(&thread_id, NULL, thread_function, NULL);
     if (ret != 0) {
