@@ -48,7 +48,7 @@ static int loghead(int ifwrite,char *fmt) {
 
         // 启动参数输出位置
         fprintf(stream, "= Startup parameters:\n");
-        for (int i = 0; i < 10; i++) { // 假设最多显示10个启动参数
+        for (int i = 0; i < 10; i++) { // 最多显示10个启动参数
             if (loginfo.argv[i] == NULL) break;
             fprintf(stream, "    %d: %s\n", i, loginfo.argv[i]);
         }
@@ -56,16 +56,16 @@ static int loghead(int ifwrite,char *fmt) {
         // 按照传入的格式化字符串输出开始时间
         fprintf(stream, "= Start time: %s\n", fmt);
         
-        // 输出随机日志尾信息（假设 bortok 是一个包含多个日志尾信息的数组）
+        // 输出随机日志尾信息
         fprintf (stream,"= %s\n",bortok[rand()%(sizeof (bortok)/sizeof(bortok[0]))]);
         
         // 再次输出分隔线，增强日志的可读性
         fprintf(stream, "============================================================\n");
 
-        // 更新全局变量if_write_head的值，此处假设if_write_head用于标记日志头是否已输出
+        // 更新全局变量if_write_head的值
         ++if_write_head;
     }
-    // 返回0，表明函数执行完成（此处可根据实际逻辑调整返回值的含义和用途）
+    // 返回0，表明函数执行完成
     return 0;
 }
 
