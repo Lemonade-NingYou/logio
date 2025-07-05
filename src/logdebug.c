@@ -182,6 +182,5 @@ void logBUG() {
         exit(EXIT_FAILURE);
     }
     
-    // 此时内存使用情况已被记录，但不会输出任何信息
-    // 直到调用 logexit
+    // 此时内存使用情况已被记录，但不会输出任何信息直到调用 logexit
 }
