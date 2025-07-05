@@ -47,11 +47,11 @@ static int logend(int ifwrite,int status) {
         fprintf(stream,"= End of log- \n");
         // 输出程序退出时间
         fprintf(stream,"= Exit time: %s\n", timetic);
-        // 预留程序运行时间输出位置，后续可根据实际情况填充
+        // 程序运行时间输出，
         end = clock(); // 记录程序结束时间
         double elapsed_time = (double)(end - start) / CLOCKS_PER_SEC;
         fprintf(stream,"= Running time: %lf\n",elapsed_time);
-        // 日志条目数量输出位置,neno
+        // 日志条目数量输出位置
         fprintf(stream,"= Log entry: %d\n",logentry);
         // 退出状态输出位置
         fprintf(stream,"= Exit status: %d\n",status);
@@ -61,7 +61,7 @@ static int logend(int ifwrite,int status) {
         // 再次输出分隔线，增强日志的可读性
         fprintf(stream,"============================================================\n");
         
-        // 更新全局变量 if_write_end 的值，此处假设 if_write_end 用于标记日志尾是否已输出
+        // 更新全局变量 if_write_end 的值
         ++if_write_end;
     }
     // 返回0，表明函数执行完成
