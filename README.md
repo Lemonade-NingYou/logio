@@ -62,19 +62,8 @@ int main(int argc, char **argv)
 - [x] Android
 - [x] termux
 ## About makefile
-- if you are GNU/Linux user, you shouldn't change makefile
-- if you are termux user ,you should change
-```
-# 安装目录
-INSTALL_LIB_DIR := /usr/local/lib
-INSTALL_INCLUDE_DIR := /usr/local/include
-```
-to  
-```
-# 安装目录
-INSTALL_LIB_DIR := data/data/com.termux/files/usr/lib
-INSTALL_INCLUDE_DIR := data/data/com.termux/files/usr/include
-```
+- if you are GNU/Linux user, you should run Makefile
+- if you are termux user ,you shoude run makefile
 
 ## author
 - If you think it not useful you can call this e-mail: `lemonade_ningyou126.com`
