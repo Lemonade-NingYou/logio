@@ -17,7 +17,7 @@
 
 #include "../include/logio.h"
 
-// 全局变量定义
+// 全局变量定义 
 clock_t start = 0;
 clock_t end = 0;
 int logentry = 0;
