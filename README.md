@@ -1,4 +1,7 @@
-![icon](image/icon.png)
+![icon](image/icon.png)<!-- 居中对齐 -->
+<div align="center">
+  <img src="icon.png" alt="icon" width="400">
+</div>
 # Project Name
 - LOG Information Output (logio)
 
