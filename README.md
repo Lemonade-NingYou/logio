@@ -1,4 +1,4 @@
-![icon](iminage/icon.png)
+![icon](image/icon.png)
 # Project Name
 - LOG Information Output (logio)
 
