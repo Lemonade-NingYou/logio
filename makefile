@@ -16,8 +16,8 @@ SRCS := $(wildcard $(SRC_DIR)/*.c)
 OBJS := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRCS))
 
 # 安装目录
-INSTALL_LIB_DIR := /usr/local/lib
-INSTALL_INCLUDE_DIR := /usr/local/include
+INSTALL_LIB_DIR := /data/data/com.termux/files/usr/lib
+INSTALL_INCLUDE_DIR := /data/data/com.termux/files/usr/include
 
 # 默认目标：创建目录并编译
 all: create_dirs $(TARGET)
