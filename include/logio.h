@@ -36,7 +36,7 @@ typedef struct {
     char *argv[100];
 } LogInfo;
 
-typedef struct {
+typedef struct { 
     const char *timeformat;
     const char *FoldName;
     const char *filename;
