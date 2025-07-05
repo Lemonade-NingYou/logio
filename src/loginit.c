@@ -30,7 +30,7 @@ static int create_directory(const char *dir)
 		return EXIT_SUCCESS;
 	}
 	else if (errno == EEXIST)
-	{ // 目录已存在
+	{ // 目录已存在 
 		printf("The folder '%s' already exists\n", dir);
 		return EXIT_SUCCESS;
 	}
