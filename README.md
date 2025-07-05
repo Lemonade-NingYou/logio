@@ -1,4 +1,3 @@
-//![icon](image/icon.png)
 <!-- 居中对齐 -->
 <div align="center">
   <img src="image/icon.png" alt="icon" width="400">
