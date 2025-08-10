@@ -31,7 +31,8 @@ static char *bortok[] = {
 	"Cat is a pigeon 😡, don't learn it",
 };
 
-static int loghead(int ifwrite,char *fmt) {
+static int loghead(int ifwrite,char *fmt) 
+{
     // 使用 global_log_info 替代 logipr
     if (!ifwrite) {
         struct utsname sys_info;
@@ -69,9 +70,11 @@ static int loghead(int ifwrite,char *fmt) {
     return 0;
 }
 
-void logprint(int visible, const char *mode, const char *fmt, ...) {
+void logprint(int visible, const char *mode, const char *fmt, ...) 
+{
     pthread_mutex_lock(&mutex);   // 阻塞直到获取锁
-    if (stream == NULL || mode == NULL) {
+    if (stream == NULL || mode == NULL) 
+    {
         perror("Not initialized correctly");
         perror("Mode not provided");
         pthread_mutex_unlock(&mutex);// 互斥锁解锁
@@ -90,14 +93,16 @@ void logprint(int visible, const char *mode, const char *fmt, ...) {
         exit(EXIT_FAILURE);
     }
         
-    if (tm == NULL) {
+    if (tm == NULL) 
+    {
         perror("Failed to get local time");
         pthread_mutex_unlock(&mutex);// 互斥锁解锁
         exit(EXIT_FAILURE);
     }
 
     // 标准输出可见性处理
-    if (visible == VISIBLE) {
+    if (visible == VISIBLE) 
+    {
         va_list args;
         va_start(args, fmt);
         vfprintf(stdout, fmt, args);
@@ -118,7 +123,7 @@ void logprint(int visible, const char *mode, const char *fmt, ...) {
     }
 
     // 统一输出（减少重复的 fprintf 和 logentry++）
-    fprintf(stream, "[%s][%s/%s] ", timetic, level, (global_log_info.argv[0] == NULL) ? "N/A" : global_log_info.argv[0]);
+    fprintf(stream, "\n[%s][%s/%s] ", timetic, level, (global_log_info.argv[0] == NULL) ? "N/A" : global_log_info.argv[0]);
     ++logentry;
 
     // 内容写入

@@ -17,6 +17,7 @@
 - `void logBUG() ` somebody not write it, f**k you cat
 - how to use :
 ```c
+// test.c
 #include <stdio.h>
 #include <stdlib.h>
 #include <logio.h>
@@ -45,9 +46,6 @@ int main(int argc, char **argv)
     // test invisible information print
     logprint(INVISIBLE, "i", "This is an invisible message.\n");
     printf("Log printing succeeded.\n");
-
-    // test log debug
-    logdebug();
 
     // test log exit
     printf("Testing log exit...\n");
