@@ -74,7 +74,6 @@ int main(int argc, char **argv)
     
     // Debug information (file only)
     log_print_message(INVISIBLE, "i", "Debug info: UserID=%d\n", 12345);
-
     // Exit program gracefully
     log_exit_program(EXIT_SUCCESS);
 }
