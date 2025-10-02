@@ -15,6 +15,10 @@ TARGET  := $(BIN_DIR)/lib$(LIB_NAME).so
 SRCS := $(wildcard $(SRC_DIR)/*.c)
 OBJS := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRCS))
 
+# 在Makefile中添加
+CFLAGS += -fstack-protector-strong -fstack-clash-protection -fno-strict-aliasing
+CFLAGS += -Wstack-usage=1024 -fno-optimize-sibling-calls
+
 # 安装目录
 INSTALL_LIB_DIR := /data/data/com.termux/files/usr/lib
 INSTALL_INCLUDE_DIR := /data/data/com.termux/files/usr/include

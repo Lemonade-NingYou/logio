@@ -39,7 +39,12 @@ static char *random_header_messages[] = {
  */
 const char* log_get_random_header_message(void)
 {
-    srand(time(NULL));
+    static int seeded = 0;
+    if (!seeded) {
+        srand((unsigned int)time(NULL));
+        seeded = 1;
+    }
+    
     int index = rand() % (sizeof(random_header_messages) / sizeof(random_header_messages[0]));
     return random_header_messages[index];
 }
@@ -50,10 +55,14 @@ const char* log_get_random_header_message(void)
  * 获取操作系统和硬件架构信息
  * 
  * @param sys_info 输出系统信息结构
- * @return int 成功返回0
+ * @return int 成功返回0，失败返回-1
  */
 int log_get_system_info(struct utsname *sys_info)
 {
+    if (sys_info == NULL) {
+        return -1;
+    }
+    
     if (uname(sys_info) != 0) {
         perror("Failed to get system information");
         return -1;
@@ -62,17 +71,17 @@ int log_get_system_info(struct utsname *sys_info)
 }
 
 /**
- * @brief 写入日志头信息
+ * @brief 直接写入日志头信息（无锁版本）
  * 
  * 在日志文件开头写入程序信息、系统信息等
  * 
- * @param ifwrite 是否已写入标志
  * @param timestamp 时间戳字符串
  */
-void log_write_header(int ifwrite, const char *timestamp)
+void log_write_header_direct(const char *timestamp)
 {
-    if (ifwrite) {
-        return; // 如果已经写过头部，直接返回
+    if (timestamp == NULL) {
+        fprintf(stderr, "Invalid timestamp in log_write_header_direct\n");
+        return;
     }
 
     struct utsname sys_info;
@@ -84,12 +93,12 @@ void log_write_header(int ifwrite, const char *timestamp)
     fprintf(stream, "============================================================\n");
     
     // 写入应用程序信息
-    fprintf(stream, "= Application log- %s\n", 
-            (global_log_info.argv[0] == NULL) ? "N/A" : global_log_info.argv[0]);
+    const char *app_name = (global_log_info.argv[0] == NULL) ? "N/A" : global_log_info.argv[0];
+    fprintf(stream, "= Application log- %s\n", app_name);
     
     // 输出版本号信息
-    fprintf(stream, "= Version number: %s\n", 
-            (global_log_info.version == NULL) ? "N/A" : global_log_info.version);
+    const char *version = (global_log_info.version == NULL) ? "N/A" : global_log_info.version;
+    fprintf(stream, "= Version number: %s\n", version);
 
     // 操作系统环境信息
     fprintf(stream, "= Operating Environment: %s %s (%s)\n", 
@@ -110,9 +119,7 @@ void log_write_header(int ifwrite, const char *timestamp)
     
     // 结束分隔线
     fprintf(stream, "============================================================\n");
-
-    // 更新全局标志
-    ++if_write_head;
+    fflush(stream);
 }
 
 /**
@@ -125,10 +132,26 @@ void log_write_header(int ifwrite, const char *timestamp)
  */
 void log_format_standard_time(char *buffer, size_t size)
 {
+    if (buffer == NULL) {
+        return;
+    }
+    
     time_t now = time(NULL);
-    struct tm *tm = localtime(&now);
+    if (now == (time_t)-1) {
+        strncpy(buffer, "1970-01-01 00:00:00", size - 1);
+        buffer[size - 1] = '\0';
+        return;
+    }
+    
+    struct tm *tm_info = localtime(&now);
+    if (tm_info == NULL) {
+        strncpy(buffer, "1970-01-01 00:00:00", size - 1);
+        buffer[size - 1] = '\0';
+        return;
+    }
+    
     const char *fmt = "%Y-%m-%d %H:%M:%S";
-    strftime(buffer, size, fmt, tm);
+    strftime(buffer, size, fmt, tm_info);
 }
 
 /**
@@ -141,6 +164,10 @@ void log_format_standard_time(char *buffer, size_t size)
  */
 const char* log_convert_level(const char *mode)
 {
+    if (mode == NULL) {
+        return "UNKNOWN";
+    }
+    
     if (mode[0] != '\0' && mode[1] == '\0') {
         switch (mode[0]) {
             case 'e': return "ERROR";
@@ -154,68 +181,31 @@ const char* log_convert_level(const char *mode)
 }
 
 /**
- * @brief 输出到控制台
+ * @brief 安全的字符串格式化函数
  * 
- * 根据可见性标志决定是否在控制台输出日志
- * 
- * @param visible 可见性标志
- * @param fmt 格式字符串
- * @param args 可变参数列表
+ * @param str 输出缓冲区
+ * @param size 缓冲区大小
+ * @param format 格式字符串
+ * @param ap 可变参数列表
+ * @return int 写入的字符数
  */
-void log_output_to_console(int visible, const char *fmt, va_list args)
+int log_vsnprintf_safe(char *str, size_t size, const char *format, va_list ap)
 {
-    if (visible == VISIBLE) {
-        va_list console_args;
-        va_copy(console_args, args);
-        vfprintf(stdout, fmt, console_args);
-        va_end(console_args);
+    if (str == NULL || format == NULL) {
+        return -1;
     }
-}
-
-/**
- * @brief 输出到日志文件
- * 
- * 将格式化后的日志消息写入日志文件
- * 
- * @param level 日志级别
- * @param timestamp 时间戳
- * @param fmt 格式字符串
- * @param args 可变参数列表
- */
-void log_output_to_file(const char *level, const char *timestamp, 
-                       const char *fmt, va_list args)
-{
-    // 写入日志条目头部
-    fprintf(stream, "\n[%s][%s/%s] ", timestamp, level,
-            (global_log_info.argv[0] == NULL) ? "N/A" : global_log_info.argv[0]);
     
-    // 递增日志条目计数器
-    ++logentry;
+    int result = vsnprintf(str, size, format, ap);
     
-    // 写入日志内容
-    vfprintf(stream, fmt, args);
-    
-    // 刷新文件流
-    fflush(stream);
-}
-
-/**
- * @brief 执行所有注册的回调函数
- * 
- * 遍历所有已注册的回调函数并执行
- * 
- * @param level 日志级别
- * @param message 日志消息
- * @param timestamp 时间戳
- */
-void log_execute_callbacks(const char *level, const char *message, 
-                          const char *timestamp)
-{
-    for (int i = 0; i < callback_count; i++) {
-        if (callbacks[i].callback != NULL) {
-            callbacks[i].callback(level, message, timestamp, callbacks[i].user_data);
-        }
+    // 检查是否发生截断
+    if (result >= (int)size) {
+        // 缓冲区不足，确保字符串以null结尾
+        str[size - 1] = '\0';
+        fprintf(stderr, "Warning: String truncated in log_vsnprintf_safe (required: %d, available: %zu)\n", 
+                result, size);
     }
+    
+    return result;
 }
 
 /**
@@ -230,49 +220,76 @@ void log_execute_callbacks(const char *level, const char *message,
  */
 void log_print_message(int visible, const char *signals, const char *fmt, ...)
 {
-    pthread_mutex_lock(&mutex);   // 获取互斥锁
-    
-    // 参数验证
-    if (stream == NULL || signals == NULL) {
-        perror("Log system not initialized correctly");
-        pthread_mutex_unlock(&mutex);
-        exit(EXIT_FAILURE);
+    // 使用原子操作检查初始化状态
+    if (!atomic_load(&log_initialized)) {
+        // 回退到简单输出
+        if (visible == VISIBLE && fmt != NULL) {
+            va_list args;
+            va_start(args, fmt);
+            vfprintf(stdout, fmt, args);
+            fflush(stdout);
+            va_end(args);
+        }
+        return;
     }
     
-    // 生成时间戳
+    // 生成时间戳（无锁操作）
     char timestamp[128];
     log_format_standard_time(timestamp, sizeof(timestamp));
     
-    // 写入日志头（如果尚未写入）
-    log_write_header(if_write_head, timestamp);
-    
-    // 转换日志级别
+    // 转换日志级别（无锁操作）
     const char *level = log_convert_level(signals);
     
-    // 处理可变参数
+    // 格式化消息（无锁操作）
+    char formatted_message[CHARSTRANGMAX];
     va_list args;
     va_start(args, fmt);
-    
-    // 输出到控制台
-    log_output_to_console(visible, fmt, args);
-    
-    // 重置参数列表用于文件输出
-    va_end(args);
-    va_start(args, fmt);
-    
-    // 输出到文件
-    log_output_to_file(level, timestamp, fmt, args);
-    
+    int msg_len = log_vsnprintf_safe(formatted_message, sizeof(formatted_message), fmt, args);
     va_end(args);
     
-    // 构建完整消息用于回调（需要重新格式化）
-    char formatted_message[CHARSTRANGMAX];
-    va_start(args, fmt);
-    vsnprintf(formatted_message, sizeof(formatted_message), fmt, args);
-    va_end(args);
+    if (msg_len <= 0) {
+        return;
+    }
     
-    // 执行回调函数
-    log_execute_callbacks(level, formatted_message, timestamp);
+    // 输出到控制台（无锁操作）
+    if (visible == VISIBLE) {
+        printf("%s", formatted_message);
+        fflush(stdout);
+    }
     
-    pthread_mutex_unlock(&mutex); // 释放互斥锁
+    // 文件写入需要锁保护，但时间很短
+    int lock_acquired = 0;
+    if (pthread_mutex_trylock(&mutex) == 0) {
+        lock_acquired = 1;
+        
+        // 检查流状态
+        if (stream != NULL) {
+            // 写入日志头（如果需要）
+            if (!atomic_load(&if_write_head)) {
+                log_write_header_direct(timestamp);
+                atomic_store(&if_write_head, 1);
+            }
+            
+            // 写入日志内容
+            const char *app_name = (global_log_info.argv[0] == NULL) ? "N/A" : global_log_info.argv[0];
+            fprintf(stream, "\n[%s][%s/%s] %s", timestamp, level, app_name, formatted_message);
+            fflush(stream);
+            
+            // 原子递增计数器
+            atomic_fetch_add(&logentry, 1);
+        }
+        
+        pthread_mutex_unlock(&mutex);
+    } else {
+        // 无法获取锁，记录到备用位置或忽略
+        fprintf(stderr, "Log system busy, message dropped: %s\n", formatted_message);
+    }
+    
+    // 异步执行回调（无阻塞）
+    if (atomic_load(&callback_thread_running)) {
+        log_submit_async_callback(level, formatted_message, timestamp);
+    } else {
+        // 回退到同步执行（短暂持锁）
+        log_execute_callbacks_direct(level, formatted_message, timestamp);
+    }
 }

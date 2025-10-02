@@ -20,34 +20,147 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <libgen.h>
 #include "../include/logio.h"
+
+/**
+ * @brief 安全的目录创建函数
+ * 
+ * 递归创建多级目录，如果目录已存在则忽略
+ * 
+ * @param dir 目录路径
+ * @return int 成功返回EXIT_SUCCESS，失败返回EXIT_FAILURE
+ */
+int log_create_directory_recursive_safe(const char *dir)
+{
+    if (dir == NULL) {
+        LOG_ERROR("Directory path is NULL", EXIT_FAILURE);
+    }
+    
+    // 检查路径长度
+    if (strlen(dir) >= CHARSTRANGMAX) {
+        LOG_ERROR("Directory path too long", EXIT_FAILURE);
+    }
+    
+    char tmp[CHARSTRANGMAX];
+    char *p = NULL;
+    size_t len;
+    
+    // 使用strncpy替代snprintf，避免格式化字符串漏洞
+    strncpy(tmp, dir, sizeof(tmp) - 1);
+    tmp[sizeof(tmp) - 1] = '\0';
+    
+    len = strlen(tmp);
+    
+    // 去除末尾的斜杠
+    if (len > 0 && tmp[len - 1] == '/') {
+        tmp[len - 1] = '\0';
+    }
+    
+    // 逐级创建目录
+    for (p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            
+            // 创建当前层级的目录
+            if (mkdir(tmp, 0755) != 0) {
+                if (errno != EEXIST) {
+                    LOG_ERROR("Failed to create directory", EXIT_FAILURE);
+                }
+            }
+            
+            *p = '/';
+        }
+    }
+    
+    // 创建最终目录
+    if (mkdir(tmp, 0755) != 0) {
+        if (errno != EEXIST) {
+            LOG_ERROR("Failed to create final directory", EXIT_FAILURE);
+        } else {
+            printf("The folder '%s' already exists\n", dir);
+        }
+    } else {
+        printf("The folder '%s' was created successfully!\n", dir);
+    }
+    
+    return EXIT_SUCCESS;
+}
 
 /**
  * @brief 创建日志目录
  * 
- * 创建指定的目录，如果目录已存在则忽略
+ * 创建指定的目录，支持多级目录创建
  * 
  * @param dir 目录路径
  * @return int 成功返回EXIT_SUCCESS，失败返回EXIT_FAILURE
  */
 int log_create_directory(const char *dir)
 {
-    if (mkdir(dir, 0755) == 0)
-    {
-        printf("The folder '%s' was created successfully!\n", dir);
-        return EXIT_SUCCESS;
+    return log_create_directory_recursive_safe(dir);
+}
+
+/**
+ * @brief 安全的字符串复制函数
+ * 
+ * 深度复制字符串，处理内存分配失败的情况
+ * 
+ * @param src 源字符串
+ * @return char* 复制后的字符串，失败返回NULL
+ */
+char* log_strdup_safe(const char *src)
+{
+    if (src == NULL) return NULL;
+    
+    size_t len = strlen(src);
+    char *dest = malloc(len + 1);
+    if (dest == NULL) {
+        LOG_ERROR("Memory allocation failed in log_strdup_safe", EXIT_FAILURE);
+        return NULL;
     }
-    else if (errno == EEXIST)
-    { 
-        // 目录已存在 
-        printf("The folder '%s' already exists\n", dir);
-        return EXIT_SUCCESS;
+    memcpy(dest, src, len + 1);
+    return dest;
+}
+
+/**
+ * @brief 安全的命令行参数复制
+ * 
+ * 深度复制命令行参数到LogInfo结构
+ * 
+ * @param loginfo 目标LogInfo结构
+ * @param argc 参数数量
+ * @param argv 参数数组
+ * @return int 成功返回0，失败返回-1
+ */
+int log_copy_arguments_safe(LogInfo *loginfo, int argc, char **argv)
+{
+    if (loginfo == NULL || argv == NULL) {
+        fprintf(stderr, "Invalid arguments in log_copy_arguments_safe\n");
+        return -1;
     }
-    else
-    {
-        perror("Failed to create folder.\n");
-        return EXIT_FAILURE;
+    
+    // 初始化argv数组为NULL
+    memset(loginfo->argv, 0, sizeof(loginfo->argv));
+    
+    int max_args = sizeof(loginfo->argv) / sizeof(loginfo->argv[0]) - 1;
+    int copy_count = (argc < max_args) ? argc : max_args;
+    
+    for (int i = 0; i < copy_count; i++) {
+        if (argv[i] != NULL) {
+            loginfo->argv[i] = log_strdup_safe(argv[i]);
+            if (loginfo->argv[i] == NULL) {
+                // 内存分配失败，清理已分配的资源
+                for (int j = 0; j < i; j++) {
+                    free(loginfo->argv[j]);
+                    loginfo->argv[j] = NULL;
+                }
+                return -1;
+            }
+        }
     }
+    loginfo->argv[copy_count] = NULL; // 确保数组以NULL结尾
+    
+    return 0;
 }
 
 /**
@@ -61,8 +174,24 @@ int log_create_directory(const char *dir)
  */
 void log_format_timestamp(char *buffer, size_t size, const char *format)
 {
+    if (buffer == NULL || format == NULL) {
+        return;
+    }
+    
     time_t now = time(NULL);
+    if (now == (time_t)-1) {
+        strncpy(buffer, "1970-01-01_00:00:00", size - 1);
+        buffer[size - 1] = '\0';
+        return;
+    }
+    
     struct tm *local_time = localtime(&now);
+    if (local_time == NULL) {
+        strncpy(buffer, "1970-01-01_00:00:00", size - 1);
+        buffer[size - 1] = '\0';
+        return;
+    }
+    
     strftime(buffer, size, format, local_time);
 }
 
@@ -81,91 +210,135 @@ void log_build_file_path(char *complete_path, size_t size,
                         const char *fold_name, const char *file_name, 
                         const char *timestamp)
 {
+    if (complete_path == NULL || fold_name == NULL || file_name == NULL || timestamp == NULL) {
+        return;
+    }
+    
     snprintf(complete_path, size, "%s/%s_%s.log", 
              fold_name, file_name, timestamp);
 }
 
 /**
- * @brief 打开日志文件
+ * @brief 安全的文件打开函数
  * 
  * 以写入模式打开日志文件，如果失败则退出程序
  * 
  * @param file_path 文件路径
+ * @return FILE* 文件指针，失败时退出程序
  */
-void log_open_file_stream(const char *file_path)
+FILE* log_open_file_stream_safe(const char *file_path)
 {
-    stream = fopen(file_path, "w");
-    if (stream == NULL)
-    {
-        perror("Failed to open log file\n");
-        exit(EXIT_FAILURE);
+    if (file_path == NULL) {
+        LOG_ERROR("File path is NULL", EXIT_FAILURE);
     }
+    
+    // 检查文件路径长度
+    if (strlen(file_path) >= FILENAME_MAX) {
+        LOG_ERROR("File path too long", EXIT_FAILURE);
+    }
+    
+    FILE *file = fopen(file_path, "w");
+    if (file == NULL) {
+        LOG_ERROR("Failed to open log file", EXIT_FAILURE);
+    }
+    
+    // 设置文件缓冲区为行缓冲
+    if (setvbuf(file, NULL, _IOLBF, BUFSIZ) != 0) {
+        fclose(file);
+        LOG_ERROR("Failed to set file buffer mode", EXIT_FAILURE);
+    }
+    
+    return file;
 }
 
 /**
- * @brief 复制命令行参数
- * 
- * 深度复制命令行参数到LogInfo结构
- * 
- * @param loginfo 目标LogInfo结构
- * @param argc 参数数量
- * @param argv 参数数组
- */
-void log_copy_arguments(LogInfo *loginfo, int argc, char **argv)
-{
-    for (int i = 0; i < argc; i++)
-    {
-        loginfo->argv[i] = strdup(argv[i]);
-    }
-    loginfo->argv[argc] = NULL; // 确保数组以NULL结尾
-}
-
-/**
- * @brief 初始化日志系统
+ * @brief 初始化日志系统（安全版本）
  * 
  * 设置日志文件夹、文件流、全局变量等
  * 
  * @param params 初始化参数
  * @return LogInfo 初始化后的日志信息
  */
-LogInfo log_initialize(LogInitParams params)
+LogInfo log_initialize_safe(LogInitParams params)
 {
+    LogInfo loginfo = {0}; // 初始化为零
+    
+    // 设置原子标志
+    atomic_store(&log_initialized, 0);
+    atomic_store(&if_write_head, 0);
+    atomic_store(&if_write_end, 0);
+    atomic_store(&logentry, 0);
+    atomic_store(&callback_count, 0);
+    
+    // 参数验证
+    if (params.FoldName == NULL || params.filename == NULL) {
+        LOG_ERROR("Invalid initialization parameters: FoldName or filename is NULL", EXIT_FAILURE);
+        return loginfo;
+    }
+    
     // 创建日志目录
-    if (log_create_directory(params.FoldName) != EXIT_SUCCESS)
-    {
-        exit(EXIT_FAILURE);
+    if (log_create_directory(params.FoldName) != EXIT_SUCCESS) {
+        LOG_ERROR("Failed to create log directory", EXIT_FAILURE);
+        return loginfo;
     }
 
     // 记录程序开始时间
     start = clock();
 
     // 准备变量
-    char formatted_time[99];        // 格式化后的时间字符串
-    char complete_path[512];        // 完整的文件路径
+    char formatted_time[99];
+    char complete_path[512];
 
     // 格式化时间戳
-    log_format_timestamp(formatted_time, sizeof(formatted_time), 
-                        params.timeformat);
+    const char *time_format = (params.timeformat != NULL) ? params.timeformat : "%Y%m%d_%H%M%S";
+    log_format_timestamp(formatted_time, sizeof(formatted_time), time_format);
 
     // 构建完整文件路径
     log_build_file_path(complete_path, sizeof(complete_path),
                        params.FoldName, params.filename, formatted_time);
 
     // 打开日志文件
-    log_open_file_stream(complete_path);
+    stream = log_open_file_stream_safe(complete_path);
 
     // 设置默认版本号
-    char *version = (params.version == NULL) ? "0.0.0.1" : params.version;
-
-    // 初始化日志信息结构
-    LogInfo loginfo;
-    loginfo.version = strdup(version);
-    log_copy_arguments(&loginfo, params.argc, params.argv);
+    const char *version = (params.version == NULL) ? "0.0.0.1" : params.version;
+    
+    // 复制版本号
+    loginfo.version = log_strdup_safe(version);
+    if (loginfo.version == NULL) {
+        LOG_ERROR("Failed to duplicate version string", EXIT_FAILURE);
+        return loginfo;
+    }
+    
+    // 复制命令行参数
+    if (params.argc > 0 && params.argv != NULL) {
+        if (log_copy_arguments_safe(&loginfo, params.argc, params.argv) != 0) {
+            free(loginfo.version);
+            loginfo.version = NULL;
+            LOG_ERROR("Failed to copy command line arguments", EXIT_FAILURE);
+            return loginfo;
+        }
+    }
 
     // 保存到全局变量
     global_log_info = loginfo;
     
+    // 初始化异步回调系统
+    if (log_init_async_callbacks() != 0) {
+        fprintf(stderr, "Failed to initialize async callbacks, using sync mode\n");
+    }
+    
+    atomic_store(&log_initialized, 1);
+    
     return loginfo;
+}
+
+/**
+ * @brief 初始化日志系统（兼容版本）
+ */
+LogInfo log_initialize(LogInitParams params)
+{
+    return log_initialize_safe(params);
 }
 
 /**
@@ -177,6 +350,9 @@ LogInfo log_initialize(LogInitParams params)
  */
 int log_cleanup_resources(void)
 {
+    // 停止异步回调系统
+    log_stop_async_callbacks();
+    
     // 释放全局日志信息中的字符串
     if (global_log_info.version != NULL) {
         free(global_log_info.version);
@@ -186,6 +362,26 @@ int log_cleanup_resources(void)
     for (int i = 0; i < 100 && global_log_info.argv[i] != NULL; i++) {
         free(global_log_info.argv[i]);
         global_log_info.argv[i] = NULL;
+    }
+    
+    return 0;
+}
+
+/**
+ * @brief 检查全局变量是否已初始化
+ * 
+ * @return int 已初始化返回0，未初始化返回-1
+ */
+int log_check_initialization(void)
+{
+    if (!atomic_load(&log_initialized)) {
+        fprintf(stderr, "Log system not initialized\n");
+        return -1;
+    }
+    
+    if (stream == NULL) {
+        fprintf(stderr, "Log system not initialized: stream is NULL\n");
+        return -1;
     }
     
     return 0;

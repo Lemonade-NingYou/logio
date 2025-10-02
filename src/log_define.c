@@ -20,11 +20,21 @@
 /* 全局变量定义 */
 clock_t start = 0;                              /**< 程序开始时间戳 */
 clock_t end = 0;                                /**< 程序结束时间戳 */
-int logentry = 0;                               /**< 日志条目计数器 */
+atomic_int logentry = 0;                        /**< 原子日志条目计数器 */
 FILE *stream = NULL;                            /**< 日志文件流指针 */
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER; /**< 线程互斥锁 */
-LogInfo global_log_info;                        /**< 全局日志信息结构 */
-int if_write_head = 0;                          /**< 日志头写入标志 */
-int if_write_end = 0;                           /**< 日志尾写入标志 */
+LogInfo global_log_info = {0};                  /**< 全局日志信息结构 */
+atomic_int if_write_head = 0;                   /**< 原子日志头写入标志 */
+atomic_int if_write_end = 0;                    /**< 原子日志尾写入标志 */
 CallbackInfo callbacks[MAX_CALLBACKS] = {0};    /**< 回调函数数组 */
-int callback_count = 0;                         /**< 已注册回调数量 */
+atomic_int callback_count = 0;                  /**< 原子回调数量 */
+
+/* 异步回调系统变量 */
+AsyncCallbackTask *callback_queue = NULL;       /**< 回调任务队列 */
+atomic_int queue_size = 0;                      /**< 队列当前大小 */
+atomic_int queue_capacity = 0;                  /**< 队列容量 */
+pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER; /**< 队列互斥锁 */
+pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER; /**< 队列条件变量 */
+atomic_int callback_thread_running = 0;         /**< 回调线程运行标志 */
+pthread_t callback_thread_id = 0;               /**< 回调线程ID */
+atomic_int log_initialized = 0;                 /**< 日志系统初始化标志 */
