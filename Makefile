@@ -1,7 +1,7 @@
-# 编译器设置 
+# 编译器设置
 CC      := gcc
-CFLAGS  := -Wall -Wextra -fPIC -O2
-LDFLAGS := -shared
+CFLAGS  := -Wall -Wextra -fPIC -O2 -pthread
+LDFLAGS := -shared -pthread
 
 # 目录定义
 SRC_DIR := src
@@ -23,6 +23,10 @@ CFLAGS += -Wstack-usage=1024 -fno-optimize-sibling-calls
 INSTALL_LIB_DIR := /usr/local/lib
 INSTALL_INCLUDE_DIR := /usr/local/include
 
+# 测试程序
+TEST_SRC := test_logio.c
+TEST_TARGET := $(BIN_DIR)/test_logio
+
 # 默认目标：创建目录并编译
 all: create_dirs $(TARGET)
 
@@ -38,6 +42,19 @@ $(TARGET): $(OBJS)
 # 编译中间文件（.o 文件）
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 	$(CC) $(CFLAGS) -I$(INC_DIR) -c $< -o $@
+
+# 编译测试程序
+test: $(TARGET) $(TEST_TARGET)
+
+$(TEST_TARGET): $(TEST_SRC) $(TARGET)
+	$(CC) $(CFLAGS) -I$(INC_DIR) -o $@ $(TEST_SRC) -L$(BIN_DIR) -llogio -Wl,-rpath,$(BIN_DIR)
+	@echo "✅  测试程序已生成: $@"
+
+# 运行测试
+run-test: test
+	@echo "🧪  运行测试程序..."
+	@mkdir -p logs
+	@$(TEST_TARGET)
 
 # 安装目标
 install: $(TARGET)
@@ -62,4 +79,4 @@ clean:
 	rm -rf $(OBJ_DIR) $(BIN_DIR)
 	@echo "🗑️   已清理中间文件和结果目录"
 
-.PHONY: all create_dirs clean install uninstall
+.PHONY: all create_dirs clean install uninstall test run-test

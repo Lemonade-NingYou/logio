@@ -15,281 +15,299 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <stdarg.h>
-#include <sys/utsname.h>
 #include "../include/logio.h"
+#include <string.h>
+#include <unistd.h>
+#include <time.h>
+#include <sys/time.h>
 
-/* 随机日志头消息数组 */
-static char *random_header_messages[] = {
-    "Welcome to our sister log system - Microsoft",
-    "Happy birthday! If today is your birthday",
-    "Cat is a pigeon 😡, don't learn it",
-};
+/* 外部变量 */
+extern log_context_t *g_log_ctx;
+extern const char *log_level_strings[];
+extern const char *log_level_colors[];
+extern const char *LOG_COLOR_RESET;
+
+/* ==================== 辅助函数 ==================== */
 
 /**
- * @brief 获取随机日志头消息
- * 
- * 从预定义的消息数组中随机选择一条消息
- * 
- * @return const char* 随机选择的消息
+ * @brief 获取当前时间字符串
  */
-const char* log_get_random_header_message(void)
+static void get_timestamp(char *buffer, size_t size)
 {
-    static int seeded = 0;
-    if (!seeded) {
-        srand((unsigned int)time(NULL));
-        seeded = 1;
-    }
-    
-    int index = rand() % (sizeof(random_header_messages) / sizeof(random_header_messages[0]));
-    return random_header_messages[index];
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+
+    struct tm *tm_info = localtime(&tv.tv_sec);
+    strftime(buffer, size, "%Y-%m-%d %H:%M:%S", tm_info);
+
+    size_t len = strlen(buffer);
+    snprintf(buffer + len, size - len, ".%03d", (int)(tv.tv_usec / 1000));
 }
 
 /**
- * @brief 获取系统信息
- * 
- * 获取操作系统和硬件架构信息
- * 
- * @param sys_info 输出系统信息结构
- * @return int 成功返回0，失败返回-1
+ * @brief 获取线程ID
  */
-int log_get_system_info(struct utsname *sys_info)
+static uint64_t get_thread_id(void)
 {
-    if (sys_info == NULL) {
+    return (uint64_t)pthread_self();
+}
+
+/**
+ * @brief 写入日志到输出目标
+ */
+static int write_log(const char *message, size_t len, log_level_t level)
+{
+    if (!g_log_ctx || !atomic_load(&g_log_ctx->is_initialized)) {
         return -1;
     }
-    
-    if (uname(sys_info) != 0) {
-        perror("Failed to get system information");
-        return -1;
+
+    /* 写入文件（无颜色） */
+    if (g_log_ctx->config.outputs & LOG_OUTPUT_FILE) {
+        if (g_log_ctx->config.async_mode) {
+            /* 异步模式：写入缓冲区 */
+            pthread_mutex_lock(&g_log_ctx->mutex);
+
+            if (g_log_ctx->buffer_used + len > g_log_ctx->config.buffer_size) {
+                /* 缓冲区满，先刷新 */
+                if (g_log_ctx->file_stream) {
+                    fwrite(g_log_ctx->buffer, 1, g_log_ctx->buffer_used, g_log_ctx->file_stream);
+                }
+                g_log_ctx->buffer_used = 0;
+            }
+
+            if (len <= g_log_ctx->config.buffer_size) {
+                memcpy(g_log_ctx->buffer + g_log_ctx->buffer_used, message, len);
+                g_log_ctx->buffer_used += len;
+            }
+
+            pthread_mutex_unlock(&g_log_ctx->mutex);
+        } else {
+            /* 同步模式：直接写入文件 */
+            if (g_log_ctx->file_stream) {
+                fwrite(message, 1, len, g_log_ctx->file_stream);
+            }
+        }
     }
+
+    /* 写入标准输出（带颜色） */
+    if (g_log_ctx->config.outputs & LOG_OUTPUT_STDOUT) {
+        if (g_log_ctx->config.enable_color) {
+            /* 提取日志级别标记并添加颜色 */
+            const char *level_start = strstr(message, "[");
+            if (level_start) {
+                const char *level_end = strstr(level_start + 1, "]");
+                if (level_end) {
+                    /* 写入时间戳部分 */
+                    fwrite(message, 1, level_start - message, stdout);
+                    /* 写入带颜色的级别 */
+                    fprintf(stdout, "[%s%.*s%s]",
+                            log_level_colors[level],
+                            (int)(level_end - level_start - 1),
+                            level_start + 1,
+                            LOG_COLOR_RESET);
+                    /* 写入剩余部分 */
+                    fwrite(level_end + 1, 1, len - (level_end + 1 - message), stdout);
+                } else {
+                    fwrite(message, 1, len, stdout);
+                }
+            } else {
+                fwrite(message, 1, len, stdout);
+            }
+        } else {
+            fwrite(message, 1, len, stdout);
+        }
+        fflush(stdout);
+    }
+
+    /* 写入标准错误（带颜色） */
+    if (g_log_ctx->config.outputs & LOG_OUTPUT_STDERR) {
+        if (g_log_ctx->config.enable_color) {
+            /* 提取日志级别标记并添加颜色 */
+            const char *level_start = strstr(message, "[");
+            if (level_start) {
+                const char *level_end = strstr(level_start + 1, "]");
+                if (level_end) {
+                    /* 写入时间戳部分 */
+                    fwrite(message, 1, level_start - message, stderr);
+                    /* 写入带颜色的级别 */
+                    fprintf(stderr, "[%s%.*s%s]",
+                            log_level_colors[level],
+                            (int)(level_end - level_start - 1),
+                            level_start + 1,
+                            LOG_COLOR_RESET);
+                    /* 写入剩余部分 */
+                    fwrite(level_end + 1, 1, len - (level_end + 1 - message), stderr);
+                } else {
+                    fwrite(message, 1, len, stderr);
+                }
+            } else {
+                fwrite(message, 1, len, stderr);
+            }
+        } else {
+            fwrite(message, 1, len, stderr);
+        }
+        fflush(stderr);
+    }
+
     return 0;
 }
 
 /**
- * @brief 直接写入日志头信息（无锁版本）
- * 
- * 在日志文件开头写入程序信息、系统信息等
- * 
- * @param timestamp 时间戳字符串
+ * @brief 格式化日志消息（无颜色）
  */
-void log_write_header_direct(const char *timestamp)
+static int format_log_message(char *buffer, size_t size,
+                              log_level_t level,
+                              const char *file, int line, const char *func,
+                              const char *format, va_list args)
 {
-    if (timestamp == NULL) {
-        fprintf(stderr, "Invalid timestamp in log_write_header_direct\n");
-        return;
+    char *pos = buffer;
+    size_t remaining = size;
+    int written = 0;
+
+    /* 时间戳 */
+    if (g_log_ctx->config.show_timestamp) {
+        char timestamp[64];
+        get_timestamp(timestamp, sizeof(timestamp));
+        written = snprintf(pos, remaining, "[%s] ", timestamp);
+        if (written < 0 || (size_t)written >= remaining) return -1;
+        pos += written;
+        remaining -= written;
     }
 
-    struct utsname sys_info;
-    if (log_get_system_info(&sys_info) != 0) {
-        return;
+    /* 日志级别（无颜色） */
+    if (g_log_ctx->config.show_level) {
+        const char *level_str = log_level_strings[level];
+        written = snprintf(pos, remaining, "[%s] ", level_str);
+        if (written < 0 || (size_t)written >= remaining) return -1;
+        pos += written;
+        remaining -= written;
     }
 
-    // 写入日志头分隔线
-    fprintf(stream, "============================================================\n");
-    
-    // 写入应用程序信息
-    const char *app_name = (global_log_info.argv[0] == NULL) ? "N/A" : global_log_info.argv[0];
-    fprintf(stream, "= Application log- %s\n", app_name);
-    
-    // 输出版本号信息
-    const char *version = (global_log_info.version == NULL) ? "N/A" : global_log_info.version;
-    fprintf(stream, "= Version number: %s\n", version);
-
-    // 操作系统环境信息
-    fprintf(stream, "= Operating Environment: %s %s (%s)\n", 
-            sys_info.sysname, sys_info.release, sys_info.machine);
-
-    // 启动参数信息
-    fprintf(stream, "= Startup parameters:\n");
-    for (int i = 0; i < 10; i++) { // 最多显示10个启动参数
-        if (global_log_info.argv[i] == NULL) break;
-        fprintf(stream, "    %d: %s\n", i, global_log_info.argv[i]);
+    /* 线程ID */
+    if (g_log_ctx->config.show_thread_id) {
+        uint64_t tid = get_thread_id();
+        written = snprintf(pos, remaining, "[tid:%lu] ", (unsigned long)tid);
+        if (written < 0 || (size_t)written >= remaining) return -1;
+        pos += written;
+        remaining -= written;
     }
 
-    // 开始时间
-    fprintf(stream, "= Start time: %s\n", timestamp);
-    
-    // 随机日志头消息
-    fprintf(stream, "= %s\n", log_get_random_header_message());
-    
-    // 结束分隔线
-    fprintf(stream, "============================================================\n");
-    fflush(stream);
-}
-
-/**
- * @brief 格式化时间字符串
- * 
- * 生成标准格式的时间字符串
- * 
- * @param buffer 输出缓冲区
- * @param size 缓冲区大小
- */
-void log_format_standard_time(char *buffer, size_t size)
-{
-    if (buffer == NULL) {
-        return;
-    }
-    
-    time_t now = time(NULL);
-    if (now == (time_t)-1) {
-        strncpy(buffer, "1970-01-01 00:00:00", size - 1);
-        buffer[size - 1] = '\0';
-        return;
-    }
-    
-    struct tm *tm_info = localtime(&now);
-    if (tm_info == NULL) {
-        strncpy(buffer, "1970-01-01 00:00:00", size - 1);
-        buffer[size - 1] = '\0';
-        return;
-    }
-    
-    const char *fmt = "%Y-%m-%d %H:%M:%S";
-    strftime(buffer, size, fmt, tm_info);
-}
-
-/**
- * @brief 转换日志级别
- * 
- * 将单字符日志级别转换为完整级别名称
- * 
- * @param mode 单字符级别标识
- * @return const char* 完整级别名称
- */
-const char* log_convert_level(const char *mode)
-{
-    if (mode == NULL) {
-        return "UNKNOWN";
-    }
-    
-    if (mode[0] != '\0' && mode[1] == '\0') {
-        switch (mode[0]) {
-            case 'e': return "ERROR";
-            case 'f': return "FATAL";
-            case 'i': return "INFO";
-            case 'w': return "WARN";
-            default:  return "UNKNOWN";
+    /* 文件名和行号 */
+    if (g_log_ctx->config.show_file_line && file) {
+        const char *basename = strrchr(file, '/');
+        if (basename) {
+            basename++;
+        } else {
+            basename = file;
         }
+        written = snprintf(pos, remaining, "[%s:%d] ", basename, line);
+        if (written < 0 || (size_t)written >= remaining) return -1;
+        pos += written;
+        remaining -= written;
     }
-    return "UNKNOWN";
+
+    /* 函数名 */
+    if (func) {
+        written = snprintf(pos, remaining, "%s: ", func);
+        if (written < 0 || (size_t)written >= remaining) return -1;
+        pos += written;
+        remaining -= written;
+    }
+
+    /* 日志内容 */
+    written = vsnprintf(pos, remaining, format, args);
+    if (written < 0 || (size_t)written >= remaining) return -1;
+    pos += written;
+    remaining -= written;
+
+    /* 换行符 */
+    if (remaining > 1) {
+        *pos++ = '\n';
+        *pos = '\0';
+    }
+
+    return pos - buffer;
 }
 
-/**
- * @brief 安全的字符串格式化函数
- * 
- * @param str 输出缓冲区
- * @param size 缓冲区大小
- * @param format 格式字符串
- * @param ap 可变参数列表
- * @return int 写入的字符数
- */
-int log_vsnprintf_safe(char *str, size_t size, const char *format, va_list ap)
+/* ==================== 公开函数 ==================== */
+
+int log_vprint(log_level_t level, const char *file, int line, const char *func,
+               const char *format, va_list args)
 {
-    if (str == NULL || format == NULL) {
+    if (!g_log_ctx || !atomic_load(&g_log_ctx->is_initialized)) {
         return -1;
     }
-    
-    int result = vsnprintf(str, size, format, ap);
-    
-    // 检查是否发生截断
-    if (result >= (int)size) {
-        // 缓冲区不足，确保字符串以null结尾
-        str[size - 1] = '\0';
-        fprintf(stderr, "Warning: String truncated in log_vsnprintf_safe (required: %d, available: %zu)\n", 
-                result, size);
+
+    /* 检查日志级别 */
+    if (level < g_log_ctx->config.level) {
+        return 0;
     }
-    
-    return result;
+
+    pthread_mutex_lock(&g_log_ctx->mutex);
+
+    /* 格式化消息 */
+    char message[LOG_MAX_MESSAGE_LEN];
+    va_list args_copy;
+    va_copy(args_copy, args);
+    int len = format_log_message(message, sizeof(message), level, file, line, func, format, args_copy);
+    va_end(args_copy);
+
+    if (len < 0) {
+        pthread_mutex_unlock(&g_log_ctx->mutex);
+        return -1;
+    }
+
+    /* 写入日志 */
+    write_log(message, len, level);
+
+    /* 调用回调函数 */
+    if (g_log_ctx->config.outputs & LOG_OUTPUT_CALLBACK) {
+        for (int i = 0; i < g_log_ctx->callback_count; i++) {
+            if (g_log_ctx->callbacks[i]) {
+                g_log_ctx->callbacks[i](level, message, g_log_ctx->callback_userdata[i]);
+            }
+        }
+    }
+
+    /* 增加消息计数 */
+    atomic_fetch_add(&g_log_ctx->message_count, 1);
+
+    pthread_mutex_unlock(&g_log_ctx->mutex);
+
+    return 0;
 }
 
-/**
- * @brief 格式化并输出日志消息
- * 
- * 主要的日志输出函数，处理格式化和多路输出
- * 
- * @param visible 可见性标志
- * @param signals 日志级别标识
- * @param fmt 格式字符串
- * @param ... 可变参数
- */
-void log_print_message(int visible, const char *signals, const char *fmt, ...)
+int log_print(log_level_t level, const char *file, int line, const char *func,
+              const char *format, ...)
 {
-    // 使用原子操作检查初始化状态
-    if (!atomic_load(&log_initialized)) {
-        // 回退到简单输出
-        if (visible == VISIBLE && fmt != NULL) {
-            va_list args;
-            va_start(args, fmt);
-            vfprintf(stdout, fmt, args);
-            fflush(stdout);
-            va_end(args);
-        }
-        return;
-    }
-    
-    // 生成时间戳（无锁操作）
-    char timestamp[128];
-    log_format_standard_time(timestamp, sizeof(timestamp));
-    
-    // 转换日志级别（无锁操作）
-    const char *level = log_convert_level(signals);
-    
-    // 格式化消息（无锁操作）
-    char formatted_message[CHARSTRANGMAX];
     va_list args;
-    va_start(args, fmt);
-    int msg_len = log_vsnprintf_safe(formatted_message, sizeof(formatted_message), fmt, args);
+    va_start(args, format);
+    int ret = log_vprint(level, file, line, func, format, args);
     va_end(args);
-    
-    if (msg_len <= 0) {
-        return;
+    return ret;
+}
+
+/* ==================== 向后兼容的旧接口 ==================== */
+
+int logprint(int logsign, char *format, ...)
+{
+    if (!g_log_ctx || !atomic_load(&g_log_ctx->is_initialized)) {
+        return -1;
     }
-    
-    // 输出到控制台（无锁操作）
-    if (visible == VISIBLE) {
-        printf("%s", formatted_message);
-        fflush(stdout);
-    }
-    
-    // 文件写入需要锁保护，但时间很短
-    int lock_acquired = 0;
-    if (pthread_mutex_trylock(&mutex) == 0) {
-        lock_acquired = 1;
-        
-        // 检查流状态
-        if (stream != NULL) {
-            // 写入日志头（如果需要）
-            if (!atomic_load(&if_write_head)) {
-                log_write_header_direct(timestamp);
-                atomic_store(&if_write_head, 1);
-            }
-            
-            // 写入日志内容
-            const char *app_name = (global_log_info.argv[0] == NULL) ? "N/A" : global_log_info.argv[0];
-            fprintf(stream, "\n[%s][%s/%s] %s", timestamp, level, app_name, formatted_message);
-            fflush(stream);
-            
-            // 原子递增计数器
-            atomic_fetch_add(&logentry, 1);
-        }
-        
-        pthread_mutex_unlock(&mutex);
-    } else {
-        // 无法获取锁，记录到备用位置或忽略
-        fprintf(stderr, "Log system busy, message dropped: %s\n", formatted_message);
-    }
-    
-    // 异步执行回调（无阻塞）
-    if (atomic_load(&callback_thread_running)) {
-        log_submit_async_callback(level, formatted_message, timestamp);
-    } else {
-        // 回退到同步执行（短暂持锁）
-        log_execute_callbacks_direct(level, formatted_message, timestamp);
-    }
+
+    va_list args;
+    va_start(args, format);
+
+    /* 根据logsign确定日志级别 */
+    log_level_t level = LOG_LEVEL_INFO;
+    if (logsign & 0x01) level = LOG_LEVEL_DEBUG;
+    else if (logsign & 0x02) level = LOG_LEVEL_INFO;
+    else if (logsign & 0x04) level = LOG_LEVEL_WARN;
+    else if (logsign & 0x08) level = LOG_LEVEL_ERROR;
+    else if (logsign & 0x10) level = LOG_LEVEL_FATAL;
+
+    int ret = log_vprint(level, __FILE__, __LINE__, __func__, format, args);
+
+    va_end(args);
+    return ret;
 }

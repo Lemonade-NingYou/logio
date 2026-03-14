@@ -15,374 +15,618 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include <stdio.h>
-#include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
-#include <errno.h>
+#include <strings.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <sys/stat.h>
-#include <libgen.h>
+#include <sys/types.h>
+#include <errno.h>
+#include <limits.h>
 #include "../include/logio.h"
 
+/* 外部变量 */
+extern const log_config_t default_config;
+extern const char *log_level_strings[];
+extern const char *log_level_colors[];
+extern const char *LOG_COLOR_RESET;
+
+/* ==================== 辅助函数 ==================== */
+
 /**
- * @brief 安全的目录创建函数
- * 
- * 递归创建多级目录，如果目录已存在则忽略
- * 
- * @param dir 目录路径
- * @return int 成功返回EXIT_SUCCESS，失败返回EXIT_FAILURE
+ * @brief 创建目录（递归）
  */
-int log_create_directory_recursive_safe(const char *dir)
+static int create_directory_recursive(const char *path)
 {
-    if (dir == NULL) {
-        LOG_ERROR("Directory path is NULL", EXIT_FAILURE);
-    }
-    
-    // 检查路径长度
-    if (strlen(dir) >= CHARSTRANGMAX) {
-        LOG_ERROR("Directory path too long", EXIT_FAILURE);
-    }
-    
-    char tmp[CHARSTRANGMAX];
+    char tmp[PATH_MAX];
     char *p = NULL;
     size_t len;
-    
-    // 使用strncpy替代snprintf，避免格式化字符串漏洞
-    strncpy(tmp, dir, sizeof(tmp) - 1);
-    tmp[sizeof(tmp) - 1] = '\0';
-    
+    struct stat st;
+
+    snprintf(tmp, sizeof(tmp), "%s", path);
     len = strlen(tmp);
-    
-    // 去除末尾的斜杠
-    if (len > 0 && tmp[len - 1] == '/') {
-        tmp[len - 1] = '\0';
-    }
-    
-    // 逐级创建目录
+    if (tmp[len - 1] == '/')
+        tmp[len - 1] = 0;
+
     for (p = tmp + 1; *p; p++) {
         if (*p == '/') {
-            *p = '\0';
-            
-            // 创建当前层级的目录
-            if (mkdir(tmp, 0755) != 0) {
-                if (errno != EEXIST) {
-                    LOG_ERROR("Failed to create directory", EXIT_FAILURE);
+            *p = 0;
+            if (stat(tmp, &st) != 0) {
+                if (mkdir(tmp, 0755) != 0 && errno != EEXIST) {
+                    return -1;
                 }
             }
-            
             *p = '/';
         }
     }
-    
-    // 创建最终目录
-    if (mkdir(tmp, 0755) != 0) {
-        if (errno != EEXIST) {
-            LOG_ERROR("Failed to create final directory", EXIT_FAILURE);
-        } else {
-            printf("The folder '%s' already exists\n", dir);
+
+    if (stat(tmp, &st) != 0) {
+        if (mkdir(tmp, 0755) != 0 && errno != EEXIST) {
+            return -1;
         }
-    } else {
-        printf("The folder '%s' was created successfully!\n", dir);
     }
-    
-    return EXIT_SUCCESS;
+
+    return 0;
 }
 
 /**
- * @brief 创建日志目录
- * 
- * 创建指定的目录，支持多级目录创建
- * 
- * @param dir 目录路径
- * @return int 成功返回EXIT_SUCCESS，失败返回EXIT_FAILURE
+ * @brief 获取程序名称
  */
-int log_create_directory(const char *dir)
+static const char *get_program_name(void)
 {
-    return log_create_directory_recursive_safe(dir);
+    static char prog_name[256] = {0};
+    if (prog_name[0] == '\0') {
+        char *path = getenv("_");
+        if (!path) {
+            path = getenv("0");
+        }
+        if (!path) {
+            return "unknown";
+        }
+        const char *basename = strrchr(path, '/');
+        if (basename) {
+            basename++;
+        } else {
+            basename = path;
+        }
+        strncpy(prog_name, basename, sizeof(prog_name) - 1);
+        prog_name[sizeof(prog_name) - 1] = '\0';
+    }
+    return prog_name;
 }
 
 /**
- * @brief 安全的字符串复制函数
- * 
- * 深度复制字符串，处理内存分配失败的情况
- * 
- * @param src 源字符串
- * @return char* 复制后的字符串，失败返回NULL
+ * @brief 格式化文件路径（支持 %N, %t 和 strftime 格式符）
+ * 支持的占位符：
+ *   %N - 程序名称
+ *   %t - 时间戳（秒级，等价于 %s）
+ *   %T - 时间 %Y%m%d_%H%M%S（向后兼容）
+ *   %D - 日期 %m/%d/%y（向后兼容，注意这是strftime的标准行为）
+ *   %Y, %m, %d, %H, %M, %S 等 - 标准 strftime 格式符
  */
-char* log_strdup_safe(const char *src)
+static char *format_file_path(const char *file_path)
 {
-    if (src == NULL) return NULL;
-    
-    size_t len = strlen(src);
-    char *dest = malloc(len + 1);
-    if (dest == NULL) {
-        LOG_ERROR("Memory allocation failed in log_strdup_safe", EXIT_FAILURE);
+    if (!file_path) return NULL;
+
+    const char *prog_name = get_program_name();
+    size_t result_len = strlen(file_path) + strlen(prog_name) + 128;
+    char *result = malloc(result_len);
+    if (!result) return NULL;
+
+    char *dest = result;
+    const char *src = file_path;
+    size_t remaining = result_len;
+    time_t now = time(NULL);
+    struct tm *tm_info = localtime(&now);
+
+    while (*src && remaining > 1) {
+        if (*src == '%' && *(src + 1)) {
+            int written = 0;
+            char temp[128] = {0};
+            bool handled = false;
+
+            /* 程序名称 */
+            if (*(src + 1) == 'N') {
+                written = snprintf(dest, remaining, "%s", prog_name);
+                handled = true;
+                src += 2;
+            }
+            /* 时间戳（秒级）*/
+            else if (*(src + 1) == 't') {
+                written = snprintf(dest, remaining, "%ld", (long)now);
+                handled = true;
+                src += 2;
+            }
+            /* 向后兼容：时间 %Y%m%d_%H%M%S */
+            else if (*(src + 1) == 'T') {
+                strftime(temp, sizeof(temp), "%Y%m%d_%H%M%S", tm_info);
+                written = snprintf(dest, remaining, "%s", temp);
+                handled = true;
+                src += 2;
+            }
+            /* 向后兼容：日期 %m/%d/%y (注意：strftime的%D是MM/DD/YY) */
+            else if (*(src + 1) == 'D') {
+                strftime(temp, sizeof(temp), "%m/%d/%y", tm_info);
+                written = snprintf(dest, remaining, "%s", temp);
+                handled = true;
+                src += 2;
+            }
+            /* strftime 格式符 - 尝试处理连续的格式符 */
+            else {
+                /* 先尝试单个字符的格式符 */
+                char fmt[3] = { '%', *(src + 1), '\0' };
+                size_t fmt_len = strftime(temp, sizeof(temp), fmt, tm_info);
+
+                if (fmt_len > 0) {
+                    written = snprintf(dest, remaining, "%s", temp);
+                    handled = true;
+                    src += 2;
+                }
+            }
+
+            if (handled && written >= 0 && (size_t)written < remaining) {
+                dest += written;
+                remaining -= written;
+                continue;
+            }
+        }
+
+        /* 普通字符或无法处理的格式符 */
+        *dest++ = *src++;
+        remaining--;
+    }
+
+    *dest = '\0';
+    return result;
+}
+
+/**
+ * @brief 异步刷新线程函数
+ */
+static void *log_flush_thread_func(void *arg)
+{
+    log_context_t *ctx = (log_context_t *)arg;
+
+    while (atomic_load(&ctx->is_async_running)) {
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_sec += LOG_FLUSH_INTERVAL / 1000;
+        ts.tv_nsec += (LOG_FLUSH_INTERVAL % 1000) * 1000000;
+        if (ts.tv_nsec >= 1000000000) {
+            ts.tv_sec += ts.tv_nsec / 1000000000;
+            ts.tv_nsec %= 1000000000;
+        }
+
+        pthread_mutex_lock(&ctx->mutex);
+        pthread_cond_timedwait(&ctx->cond, &ctx->mutex, &ts);
+
+        if (ctx->buffer_used > 0) {
+            if (ctx->file_stream) {
+                fwrite(ctx->buffer, 1, ctx->buffer_used, ctx->file_stream);
+                fflush(ctx->file_stream);
+            }
+            ctx->buffer_used = 0;
+        }
+
+        pthread_mutex_unlock(&ctx->mutex);
+    }
+
+    return NULL;
+}
+
+/**
+ * @brief 初始化日志上下文
+ */
+static log_context_t *log_context_create(const log_config_t *config)
+{
+    log_context_t *ctx = calloc(1, sizeof(log_context_t));
+    if (!ctx) return NULL;
+
+    /* 复制配置 */
+    if (config) {
+        memcpy(&ctx->config, config, sizeof(log_config_t));
+    } else {
+        memcpy(&ctx->config, &default_config, sizeof(log_config_t));
+    }
+
+    /* 初始化互斥锁和条件变量 */
+    if (pthread_mutex_init(&ctx->mutex, NULL) != 0) {
+        free(ctx);
         return NULL;
     }
-    memcpy(dest, src, len + 1);
-    return dest;
+
+    if (pthread_cond_init(&ctx->cond, NULL) != 0) {
+        pthread_mutex_destroy(&ctx->mutex);
+        free(ctx);
+        return NULL;
+    }
+
+    /* 分配缓冲区 */
+    ctx->buffer = malloc(ctx->config.buffer_size);
+    if (!ctx->buffer) {
+        pthread_cond_destroy(&ctx->cond);
+        pthread_mutex_destroy(&ctx->mutex);
+        free(ctx);
+        return NULL;
+    }
+
+    atomic_init(&ctx->is_initialized, false);
+    atomic_init(&ctx->is_async_running, false);
+    atomic_init(&ctx->message_count, 0);
+
+    return ctx;
 }
 
 /**
- * @brief 安全的命令行参数复制
- * 
- * 深度复制命令行参数到LogInfo结构
- * 
- * @param loginfo 目标LogInfo结构
- * @param argc 参数数量
- * @param argv 参数数组
- * @return int 成功返回0，失败返回-1
+ * @brief 销毁日志上下文
  */
-int log_copy_arguments_safe(LogInfo *loginfo, int argc, char **argv)
+static void log_context_destroy(log_context_t *ctx)
 {
-    if (loginfo == NULL || argv == NULL) {
-        fprintf(stderr, "Invalid arguments in log_copy_arguments_safe\n");
+    if (!ctx) return;
+
+    /* 停止异步线程 */
+    if (atomic_load(&ctx->is_async_running)) {
+        atomic_store(&ctx->is_async_running, false);
+        pthread_cond_signal(&ctx->cond);
+        pthread_join(ctx->flush_thread, NULL);
+    }
+
+    /* 刷新剩余日志 */
+    if (ctx->buffer_used > 0 && ctx->file_stream) {
+        fwrite(ctx->buffer, 1, ctx->buffer_used, ctx->file_stream);
+    }
+
+    /* 关闭文件 */
+    if (ctx->file_stream && ctx->file_stream != stdout && ctx->file_stream != stderr) {
+        fclose(ctx->file_stream);
+    }
+
+    /* 释放资源 */
+    free(ctx->buffer);
+    free(ctx->file_path);
+    pthread_cond_destroy(&ctx->cond);
+    pthread_mutex_destroy(&ctx->mutex);
+    free(ctx);
+}
+
+/* ==================== 公开函数 ==================== */
+
+int log_init(const log_config_t *config)
+{
+    /* 检查是否已初始化 */
+    if (g_log_ctx && atomic_load(&g_log_ctx->is_initialized)) {
+        fprintf(stderr, "Warning: Log system already initialized\n");
+        return 0;
+    }
+
+    /* 创建上下文 */
+    g_log_ctx = log_context_create(config);
+    if (!g_log_ctx) {
+        fprintf(stderr, "Error: Failed to create log context\n");
         return -1;
     }
-    
-    // 初始化argv数组为NULL
-    memset(loginfo->argv, 0, sizeof(loginfo->argv));
-    
-    int max_args = sizeof(loginfo->argv) / sizeof(loginfo->argv[0]) - 1;
-    int copy_count = (argc < max_args) ? argc : max_args;
-    
-    for (int i = 0; i < copy_count; i++) {
-        if (argv[i] != NULL) {
-            loginfo->argv[i] = log_strdup_safe(argv[i]);
-            if (loginfo->argv[i] == NULL) {
-                // 内存分配失败，清理已分配的资源
-                for (int j = 0; j < i; j++) {
-                    free(loginfo->argv[j]);
-                    loginfo->argv[j] = NULL;
-                }
+
+    atomic_store(&g_log_ctx->is_initialized, true);
+
+    /* 启动异步刷新线程 */
+    if (g_log_ctx->config.async_mode) {
+        atomic_store(&g_log_ctx->is_async_running, true);
+        if (pthread_create(&g_log_ctx->flush_thread, NULL, log_flush_thread_func, g_log_ctx) != 0) {
+            fprintf(stderr, "Error: Failed to create flush thread\n");
+            log_context_destroy(g_log_ctx);
+            g_log_ctx = NULL;
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+int log_init_file(const char *file_path, log_level_t level)
+{
+    log_config_t config = default_config;
+    config.level = level;
+    config.outputs = LOG_OUTPUT_FILE | LOG_OUTPUT_STDOUT;
+
+    /* 格式化文件路径 */
+    char *formatted_path = format_file_path(file_path);
+    if (!formatted_path) {
+        fprintf(stderr, "Error: Failed to format file path\n");
+        return -1;
+    }
+
+    /* 提取目录路径并创建目录 */
+    char *dir_path = strdup(formatted_path);
+    if (!dir_path) {
+        free(formatted_path);
+        return -1;
+    }
+
+    char *last_slash = strrchr(dir_path, '/');
+    if (last_slash) {
+        *last_slash = '\0';
+        if (create_directory_recursive(dir_path) != 0) {
+            fprintf(stderr, "Error: Failed to create directory %s: %s\n", dir_path, strerror(errno));
+            free(dir_path);
+            free(formatted_path);
+            return -1;
+        }
+    }
+    free(dir_path);
+
+    /* 初始化日志系统 */
+    if (log_init(&config) != 0) {
+        free(formatted_path);
+        return -1;
+    }
+
+    /* 打开日志文件 */
+    g_log_ctx->file_stream = fopen(formatted_path, "a");
+    if (!g_log_ctx->file_stream) {
+        fprintf(stderr, "Error: Failed to open log file %s: %s\n", formatted_path, strerror(errno));
+        log_exit();
+        free(formatted_path);
+        return -1;
+    }
+
+    /* 保存文件路径 */
+    g_log_ctx->file_path = formatted_path;
+
+    /* 写入日志头 */
+    time_t now = time(NULL);
+    struct tm *tm_info = localtime(&now);
+    char time_str[64];
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
+
+    fprintf(g_log_ctx->file_stream, "========================================\n");
+    fprintf(g_log_ctx->file_stream, "Log started at: %s\n", time_str);
+    fprintf(g_log_ctx->file_stream, "Program: %s\n", get_program_name());
+    fprintf(g_log_ctx->file_stream, "Log Level: %s\n", log_level_strings[level]);
+    fprintf(g_log_ctx->file_stream, "Async Mode: %s\n", config.async_mode ? "enabled" : "disabled");
+    fprintf(g_log_ctx->file_stream, "========================================\n");
+    fflush(g_log_ctx->file_stream);
+
+    return 0;
+}
+
+int log_exit(void)
+{
+    if (!g_log_ctx || !atomic_load(&g_log_ctx->is_initialized)) {
+        return 0;
+    }
+
+    /* 写入日志尾 */
+    if (g_log_ctx->file_stream) {
+        time_t now = time(NULL);
+        struct tm *tm_info = localtime(&now);
+        char time_str[64];
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
+
+        fprintf(g_log_ctx->file_stream, "========================================\n");
+        fprintf(g_log_ctx->file_stream, "Log ended at: %s\n", time_str);
+        fprintf(g_log_ctx->file_stream, "Total messages: %lu\n",
+                (unsigned long)atomic_load(&g_log_ctx->message_count));
+        fprintf(g_log_ctx->file_stream, "========================================\n");
+    }
+
+    /* 销毁上下文 */
+    log_context_destroy(g_log_ctx);
+    g_log_ctx = NULL;
+
+    return 0;
+}
+
+int log_flush(void)
+{
+    if (!g_log_ctx || !atomic_load(&g_log_ctx->is_initialized)) {
+        return -1;
+    }
+
+    pthread_mutex_lock(&g_log_ctx->mutex);
+
+    if (g_log_ctx->buffer_used > 0 && g_log_ctx->file_stream) {
+        fwrite(g_log_ctx->buffer, 1, g_log_ctx->buffer_used, g_log_ctx->file_stream);
+        g_log_ctx->buffer_used = 0;
+    }
+
+    if (g_log_ctx->file_stream) {
+        fflush(g_log_ctx->file_stream);
+    }
+
+    pthread_mutex_unlock(&g_log_ctx->mutex);
+
+    return 0;
+}
+
+int log_add_callback(log_callback_t callback, void *userdata)
+{
+    if (!g_log_ctx || !atomic_load(&g_log_ctx->is_initialized)) {
+        return -1;
+    }
+
+    pthread_mutex_lock(&g_log_ctx->mutex);
+
+    if (g_log_ctx->callback_count >= LOG_MAX_CALLBACKS) {
+        pthread_mutex_unlock(&g_log_ctx->mutex);
+        return -1;
+    }
+
+    int callback_id = g_log_ctx->callback_count;
+    g_log_ctx->callbacks[callback_id] = callback;
+    g_log_ctx->callback_userdata[callback_id] = userdata;
+    g_log_ctx->callback_count++;
+
+    pthread_mutex_unlock(&g_log_ctx->mutex);
+
+    return callback_id;
+}
+
+int log_remove_callback(int callback_id)
+{
+    if (!g_log_ctx || !atomic_load(&g_log_ctx->is_initialized)) {
+        return -1;
+    }
+
+    pthread_mutex_lock(&g_log_ctx->mutex);
+
+    if (callback_id < 0 || callback_id >= g_log_ctx->callback_count) {
+        pthread_mutex_unlock(&g_log_ctx->mutex);
+        return -1;
+    }
+
+    for (int i = callback_id; i < g_log_ctx->callback_count - 1; i++) {
+        g_log_ctx->callbacks[i] = g_log_ctx->callbacks[i + 1];
+        g_log_ctx->callback_userdata[i] = g_log_ctx->callback_userdata[i + 1];
+    }
+
+    g_log_ctx->callback_count--;
+
+    pthread_mutex_unlock(&g_log_ctx->mutex);
+
+    return 0;
+}
+
+int log_set_level(log_level_t level)
+{
+    if (!g_log_ctx || !atomic_load(&g_log_ctx->is_initialized)) {
+        return -1;
+    }
+
+    pthread_mutex_lock(&g_log_ctx->mutex);
+    g_log_ctx->config.level = level;
+    pthread_mutex_unlock(&g_log_ctx->mutex);
+
+    return 0;
+}
+
+log_level_t log_get_level(void)
+{
+    if (!g_log_ctx || !atomic_load(&g_log_ctx->is_initialized)) {
+        return LOG_LEVEL_INFO;
+    }
+
+    return g_log_ctx->config.level;
+}
+
+/* ==================== 向后兼容的旧接口 ==================== */
+
+int loginit(const char *dirfile_foramt, int log_loudou, int logsign, int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+
+    /* 转换日志级别 */
+    log_level_t level = LOG_LEVEL_INFO;
+    switch (log_loudou) {
+        case 0: level = LOG_LEVEL_DEBUG; break;
+        case 1: level = LOG_LEVEL_INFO; break;
+        case 2: level = LOG_LEVEL_WARN; break;
+        case 3: level = LOG_LEVEL_ERROR; break;
+        case 4: level = LOG_LEVEL_FATAL; break;
+        default: level = LOG_LEVEL_INFO; break;
+    }
+
+    /* 构建配置 */
+    log_config_t config = {
+        .level = level,
+        .outputs = 0,
+        .async_mode = false,
+        .show_timestamp = false,
+        .show_thread_id = false,
+        .show_level = false,
+        .show_file_line = false,
+        .enable_color = false,
+        .buffer_size = LOG_BUFFER_SIZE,
+        .max_file_size = 0,
+        .max_backup_files = 5
+    };
+
+    /* 解析标志位 */
+    if (logsign & LOG_SIGN_FILE)      config.outputs |= LOG_OUTPUT_FILE;
+    if (logsign & LOG_SIGN_STDOUT)    config.outputs |= LOG_OUTPUT_STDOUT;
+    if (logsign & LOG_SIGN_STDERR)    config.outputs |= LOG_OUTPUT_STDERR;
+    if (logsign & LOG_SIGN_ASYNC)     config.async_mode = true;
+    if (logsign & LOG_SIGN_TIMESTAMP) config.show_timestamp = true;
+    if (logsign & LOG_SIGN_THREAD)    config.show_thread_id = true;
+    if (logsign & LOG_SIGN_LEVEL)     config.show_level = true;
+    if (logsign & LOG_SIGN_FILELINE)  config.show_file_line = true;
+    if (logsign & LOG_SIGN_COLOR)     config.enable_color = true;
+
+    /* 如果没有指定输出目标，默认使用文件和标准输出 */
+    if (config.outputs == 0) {
+        config.outputs = LOG_OUTPUT_FILE | LOG_OUTPUT_STDOUT;
+    }
+
+    /* 初始化日志系统 */
+    if (log_init(&config) != 0) {
+        return -1;
+    }
+
+    /* 如果指定了文件路径，打开日志文件 */
+    if ((logsign & LOG_SIGN_FILE) && dirfile_foramt) {
+        /* 格式化文件路径 */
+        char *formatted_path = format_file_path(dirfile_foramt);
+        if (!formatted_path) {
+            fprintf(stderr, "Error: Failed to format file path\n");
+            log_exit();
+            return -1;
+        }
+
+        /* 提取目录路径并创建目录 */
+        char *dir_path = strdup(formatted_path);
+        if (!dir_path) {
+            free(formatted_path);
+            log_exit();
+            return -1;
+        }
+
+        char *last_slash = strrchr(dir_path, '/');
+        if (last_slash) {
+            *last_slash = '\0';
+            if (create_directory_recursive(dir_path) != 0) {
+                fprintf(stderr, "Error: Failed to create directory %s: %s\n", dir_path, strerror(errno));
+                free(dir_path);
+                free(formatted_path);
+                log_exit();
                 return -1;
             }
         }
-    }
-    loginfo->argv[copy_count] = NULL; // 确保数组以NULL结尾
-    
-    return 0;
-}
+        free(dir_path);
 
-/**
- * @brief 格式化时间戳
- * 
- * 根据指定格式生成当前时间的时间戳字符串
- * 
- * @param buffer 输出缓冲区
- * @param size 缓冲区大小
- * @param format 时间格式字符串
- */
-void log_format_timestamp(char *buffer, size_t size, const char *format)
-{
-    if (buffer == NULL || format == NULL) {
-        return;
-    }
-    
-    time_t now = time(NULL);
-    if (now == (time_t)-1) {
-        strncpy(buffer, "1970-01-01_00:00:00", size - 1);
-        buffer[size - 1] = '\0';
-        return;
-    }
-    
-    struct tm *local_time = localtime(&now);
-    if (local_time == NULL) {
-        strncpy(buffer, "1970-01-01_00:00:00", size - 1);
-        buffer[size - 1] = '\0';
-        return;
-    }
-    
-    strftime(buffer, size, format, local_time);
-}
-
-/**
- * @brief 构建完整文件路径
- * 
- * 根据文件夹名、文件名和时间戳构建完整的日志文件路径
- * 
- * @param complete_path 输出路径缓冲区
- * @param size 缓冲区大小
- * @param fold_name 文件夹名称
- * @param file_name 文件基础名称
- * @param timestamp 时间戳字符串
- */
-void log_build_file_path(char *complete_path, size_t size, 
-                        const char *fold_name, const char *file_name, 
-                        const char *timestamp)
-{
-    if (complete_path == NULL || fold_name == NULL || file_name == NULL || timestamp == NULL) {
-        return;
-    }
-    
-    snprintf(complete_path, size, "%s/%s_%s.log", 
-             fold_name, file_name, timestamp);
-}
-
-/**
- * @brief 安全的文件打开函数
- * 
- * 以写入模式打开日志文件，如果失败则退出程序
- * 
- * @param file_path 文件路径
- * @return FILE* 文件指针，失败时退出程序
- */
-FILE* log_open_file_stream_safe(const char *file_path)
-{
-    if (file_path == NULL) {
-        LOG_ERROR("File path is NULL", EXIT_FAILURE);
-    }
-    
-    // 检查文件路径长度
-    if (strlen(file_path) >= FILENAME_MAX) {
-        LOG_ERROR("File path too long", EXIT_FAILURE);
-    }
-    
-    FILE *file = fopen(file_path, "w");
-    if (file == NULL) {
-        LOG_ERROR("Failed to open log file", EXIT_FAILURE);
-    }
-    
-    // 设置文件缓冲区为行缓冲
-    if (setvbuf(file, NULL, _IOLBF, BUFSIZ) != 0) {
-        fclose(file);
-        LOG_ERROR("Failed to set file buffer mode", EXIT_FAILURE);
-    }
-    
-    return file;
-}
-
-/**
- * @brief 初始化日志系统（安全版本）
- * 
- * 设置日志文件夹、文件流、全局变量等
- * 
- * @param params 初始化参数
- * @return LogInfo 初始化后的日志信息
- */
-LogInfo log_initialize_safe(LogInitParams params)
-{
-    LogInfo loginfo = {0}; // 初始化为零
-    
-    // 设置原子标志
-    atomic_store(&log_initialized, 0);
-    atomic_store(&if_write_head, 0);
-    atomic_store(&if_write_end, 0);
-    atomic_store(&logentry, 0);
-    atomic_store(&callback_count, 0);
-    
-    // 参数验证
-    if (params.FoldName == NULL || params.filename == NULL) {
-        LOG_ERROR("Invalid initialization parameters: FoldName or filename is NULL", EXIT_FAILURE);
-        return loginfo;
-    }
-    
-    // 创建日志目录
-    if (log_create_directory(params.FoldName) != EXIT_SUCCESS) {
-        LOG_ERROR("Failed to create log directory", EXIT_FAILURE);
-        return loginfo;
-    }
-
-    // 记录程序开始时间
-    start = clock();
-
-    // 准备变量
-    char formatted_time[99];
-    char complete_path[512];
-
-    // 格式化时间戳
-    const char *time_format = (params.timeformat != NULL) ? params.timeformat : "%Y%m%d_%H%M%S";
-    log_format_timestamp(formatted_time, sizeof(formatted_time), time_format);
-
-    // 构建完整文件路径
-    log_build_file_path(complete_path, sizeof(complete_path),
-                       params.FoldName, params.filename, formatted_time);
-
-    // 打开日志文件
-    stream = log_open_file_stream_safe(complete_path);
-
-    // 设置默认版本号
-    const char *version = (params.version == NULL) ? "0.0.0.1" : params.version;
-    
-    // 复制版本号
-    loginfo.version = log_strdup_safe(version);
-    if (loginfo.version == NULL) {
-        LOG_ERROR("Failed to duplicate version string", EXIT_FAILURE);
-        return loginfo;
-    }
-    
-    // 复制命令行参数
-    if (params.argc > 0 && params.argv != NULL) {
-        if (log_copy_arguments_safe(&loginfo, params.argc, params.argv) != 0) {
-            free(loginfo.version);
-            loginfo.version = NULL;
-            LOG_ERROR("Failed to copy command line arguments", EXIT_FAILURE);
-            return loginfo;
+        /* 打开日志文件 */
+        g_log_ctx->file_stream = fopen(formatted_path, "a");
+        if (!g_log_ctx->file_stream) {
+            fprintf(stderr, "Error: Failed to open log file %s: %s\n", formatted_path, strerror(errno));
+            log_exit();
+            free(formatted_path);
+            return -1;
         }
+
+        /* 保存文件路径 */
+        g_log_ctx->file_path = formatted_path;
+
+        /* 写入日志头 */
+        time_t now = time(NULL);
+        struct tm *tm_info = localtime(&now);
+        char time_str[64];
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", tm_info);
+
+        fprintf(g_log_ctx->file_stream, "========================================\n");
+        fprintf(g_log_ctx->file_stream, "Log started at: %s\n", time_str);
+        fprintf(g_log_ctx->file_stream, "Program: %s\n", get_program_name());
+        fprintf(g_log_ctx->file_stream, "Log Level: %s\n", log_level_strings[level]);
+        fprintf(g_log_ctx->file_stream, "Async Mode: %s\n", config.async_mode ? "enabled" : "disabled");
+        fprintf(g_log_ctx->file_stream, "========================================\n");
+        fflush(g_log_ctx->file_stream);
     }
 
-    // 保存到全局变量
-    global_log_info = loginfo;
-    
-    // 初始化异步回调系统
-    if (log_init_async_callbacks() != 0) {
-        fprintf(stderr, "Failed to initialize async callbacks, using sync mode\n");
-    }
-    
-    atomic_store(&log_initialized, 1);
-    
-    return loginfo;
-}
-
-/**
- * @brief 初始化日志系统（兼容版本）
- */
-LogInfo log_initialize(LogInitParams params)
-{
-    return log_initialize_safe(params);
-}
-
-/**
- * @brief 清理日志资源
- * 
- * 释放所有动态分配的资源
- * 
- * @return int 成功返回0
- */
-int log_cleanup_resources(void)
-{
-    // 停止异步回调系统
-    log_stop_async_callbacks();
-    
-    // 释放全局日志信息中的字符串
-    if (global_log_info.version != NULL) {
-        free(global_log_info.version);
-        global_log_info.version = NULL;
-    }
-    
-    for (int i = 0; i < 100 && global_log_info.argv[i] != NULL; i++) {
-        free(global_log_info.argv[i]);
-        global_log_info.argv[i] = NULL;
-    }
-    
     return 0;
 }
 
-/**
- * @brief 检查全局变量是否已初始化
- * 
- * @return int 已初始化返回0，未初始化返回-1
- */
-int log_check_initialization(void)
+int logexit(int status)
 {
-    if (!atomic_load(&log_initialized)) {
-        fprintf(stderr, "Log system not initialized\n");
-        return -1;
-    }
-    
-    if (stream == NULL) {
-        fprintf(stderr, "Log system not initialized: stream is NULL\n");
-        return -1;
-    }
-    
-    return 0;
+    (void)status;
+    fprintf(stderr, "Warning: logexit() is deprecated, use log_exit() instead\n");
+    return log_exit();
 }

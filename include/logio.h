@@ -27,155 +27,232 @@ extern "C" {
 #include <time.h>
 #include <errno.h>
 #include <stdatomic.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <stdbool.h>
 
-/* 日志可见性标志 */
-#define VISIBLE 0      /**< 日志同时在控制台和文件中输出 */
-#define INVISIBLE 1    /**< 日志仅在文件中输出 */
+/* ==================== 配置常量 ==================== */
 
 /* 缓冲区大小常量 */
-#define CHARSTRANGMAX 4096     /**< 字符串最大长度 */
-#define MAX_CALLBACKS 10       /**< 最大回调函数数量 */
+#define LOG_MAX_MESSAGE_LEN 4096     /**< 单条日志最大长度 */
+#define LOG_MAX_CALLBACKS 10         /**< 最大回调函数数量 */
+#define LOG_BUFFER_SIZE 65536        /**< 日志缓冲区大小 (64KB) */
+#define LOG_FLUSH_INTERVAL 1000      /**< 自动刷新间隔（毫秒） */
 
-/**
- * @brief 日志信息结构体
- * 
- * 存储日志系统的版本信息和命令行参数
- */
+/* 日志级别定义 */
+typedef enum {
+    LOG_LEVEL_DEBUG = 0,    /**< 调试信息 */
+    LOG_LEVEL_INFO = 1,     /**< 普通信息 */
+    LOG_LEVEL_WARN = 2,     /**< 警告信息 */
+    LOG_LEVEL_ERROR = 3,    /**< 错误信息 */
+    LOG_LEVEL_FATAL = 4     /**< 致命错误 */
+} log_level_t;
+
+/* 日志输出目标 */
+typedef enum {
+    LOG_OUTPUT_FILE = 1,    /**< 输出到文件 */
+    LOG_OUTPUT_STDOUT = 2,  /**< 输出到标准输出 */
+    LOG_OUTPUT_STDERR = 4,  /**< 输出到标准错误 */
+    LOG_OUTPUT_CALLBACK = 8 /**< 输出到回调函数 */
+} log_output_t;
+
+/* ==================== 数据结构 ==================== */
+
+/* 日志回调函数类型 */
+typedef void (*log_callback_t)(log_level_t level, const char *message, void *userdata);
+
+/* 日志系统配置 */
 typedef struct {
-    char *version;          /**< 程序版本字符串 */
-    char *argv[100];        /**< 命令行参数数组 */
-} LogInfo;
+    log_level_t level;              /**< 当前日志级别 */
+    int outputs;                    /**< 输出目标（位掩码） */
+    bool async_mode;                /**< 是否启用异步模式 */
+    bool show_timestamp;            /**< 是否显示时间戳 */
+    bool show_thread_id;            /**< 是否显示线程ID */
+    bool show_level;                /**< 是否显示日志级别 */
+    bool show_file_line;            /**< 是否显示文件名和行号 */
+    bool enable_color;              /**< 是否启用颜色输出（终端） */
+    size_t buffer_size;             /**< 缓冲区大小 */
+    size_t max_file_size;           /**< 最大文件大小（字节，0表示不限制） */
+    int max_backup_files;           /**< 最大备份文件数 */
+} log_config_t;
+
+/* 日志上下文（内部使用） */
+typedef struct {
+    pthread_mutex_t mutex;          /**< 互斥锁 */
+    pthread_cond_t cond;            /**< 条件变量（异步模式） */
+    pthread_t flush_thread;         /**< 刷新线程（异步模式） */
+    log_config_t config;            /**< 配置 */
+    FILE *file_stream;              /**< 文件流 */
+    char *file_path;                /**< 文件路径 */
+    char *buffer;                   /**< 日志缓冲区 */
+    size_t buffer_used;             /**< 缓冲区已使用大小 */
+    atomic_bool is_initialized;     /**< 是否已初始化 */
+    atomic_bool is_async_running;   /**< 异步线程是否运行中 */
+    log_callback_t callbacks[LOG_MAX_CALLBACKS]; /**< 回调函数数组 */
+    void *callback_userdata[LOG_MAX_CALLBACKS]; /**< 回调用户数据 */
+    int callback_count;             /**< 回调函数数量 */
+    atomic_uint_fast64_t message_count; /**< 已处理的日志消息数 */
+} log_context_t;
+
+/* ==================== 全局变量 ==================== */
+
+extern log_context_t *g_log_ctx;    /**< 全局日志上下文 */
+
+/* ==================== 函数声明 ==================== */
 
 /**
- * @brief 日志初始化参数结构体
- * 
- * 用于配置日志系统的初始化参数
+ * @brief 初始化日志系统
+ *
+ * @param config 日志配置（NULL则使用默认配置）
+ * @return 0 成功，-1 失败
  */
-typedef struct { 
-    const char *timeformat;     /**< 时间格式字符串 */
-    const char *FoldName;       /**< 日志文件夹名称 */
-    const char *filename;       /**< 日志文件基础名称 */
-    const char *program_name;   /**< 程序名称 */
-    char *version;              /**< 程序版本 */
-    int argc;                   /**< 命令行参数数量 */
-    char **argv;                /**< 命令行参数数组 */
-} LogInitParams;
+int log_init(const log_config_t *config);
 
 /**
- * @brief 日志回调函数类型定义
- * 
+ * @brief 使用文件初始化日志系统（兼容旧接口）
+ *
+ * @param file_path 日志文件路径，支持以下占位符：
+ *                  - %%N: 程序名称
+ *                  - %%t: 时间戳（秒级，Unix时间戳）
+ *                  - %%T: 时间（格式：YYYYMMDD_HHMMSS，向后兼容）
+ *                  - %%D: 日期（格式：MM/DD/YY，向后兼容）
+ *                  - %%Y, %%m, %%d, %%H, %%M, %%S 等：标准 strftime 格式符
+ *                  示例："logs/app_%%Y-%%m-%%d_%%H:%%M:%%S.log"
  * @param level 日志级别
- * @param message 日志消息内容
- * @param timestamp 时间戳字符串
- * @param user_data 用户自定义数据
+ * @return 0 成功，-1 失败
  */
-typedef void (*LogCallback)(const char *level, const char *message, 
-                           const char *timestamp, void *user_data);
+int log_init_file(const char *file_path, log_level_t level);
 
 /**
- * @brief 回调注册信息结构体
+ * @brief 反初始化日志系统，释放资源
+ *
+ * @return 0 成功，-1 失败
  */
-typedef struct {
-    LogCallback callback;   /**< 回调函数指针 */
-    void *user_data;        /**< 用户自定义数据 */
-} CallbackInfo;
+int log_exit(void);
 
-/* 异步回调任务结构体 */
-typedef struct {
-    char level[32];
-    char message[CHARSTRANGMAX];
-    char timestamp[128];
-} AsyncCallbackTask;
+/**
+ * @brief 刷新日志缓冲区（立即写入）
+ *
+ * @return 0 成功，-1 失败
+ */
+int log_flush(void);
 
-/* 全局变量声明 */
-extern clock_t start;                   /**< 程序开始时间 */
-extern clock_t end;                     /**< 程序结束时间 */
-extern atomic_int logentry;             /**< 原子日志条目计数器 */
-extern FILE *stream;                    /**< 日志文件流指针 */
-extern pthread_mutex_t mutex;           /**< 线程互斥锁 */
-extern LogInfo global_log_info;         /**< 全局日志信息 */
-extern atomic_int if_write_head;        /**< 原子日志头写入标志 */
-extern atomic_int if_write_end;         /**< 原子日志尾写入标志 */
-extern CallbackInfo callbacks[MAX_CALLBACKS];  /**< 回调函数数组 */
-extern atomic_int callback_count;       /**< 原子回调数量 */
+/**
+ * @brief 添加回调函数
+ *
+ * @param callback 回调函数
+ * @param userdata 用户数据
+ * @return 回调ID（>=0）成功，-1 失败
+ */
+int log_add_callback(log_callback_t callback, void *userdata);
 
-/* 异步回调系统变量 */
-extern AsyncCallbackTask *callback_queue;      /**< 回调任务队列 */
-extern atomic_int queue_size;                  /**< 队列当前大小 */
-extern atomic_int queue_capacity;              /**< 队列容量 */
-extern pthread_mutex_t queue_mutex;            /**< 队列互斥锁 */
-extern pthread_cond_t queue_cond;              /**< 队列条件变量 */
-extern atomic_int callback_thread_running;     /**< 回调线程运行标志 */
-extern pthread_t callback_thread_id;           /**< 回调线程ID */
-extern atomic_int log_initialized;             /**< 日志系统初始化标志 */
+/**
+ * @brief 删除回调函数
+ *
+ * @param callback_id 回调ID
+ * @return 0 成功，-1 失败
+ */
+int log_remove_callback(int callback_id);
 
-/* 初始化函数声明 */
-LogInfo log_initialize(LogInitParams params);
-LogInfo log_initialize_safe(LogInitParams params);
-int log_cleanup_resources(void);
+/**
+ * @brief 设置日志级别
+ *
+ * @param level 日志级别
+ * @return 0 成功，-1 失败
+ */
+int log_set_level(log_level_t level);
 
-/* 核心日志功能函数声明 */
-void log_print_message(int visible, const char *signals, const char *fmt, ...);
-void log_write_header_direct(const char *timestamp);
-int log_write_footer(int ifwrite, int status);
+/**
+ * @brief 获取日志级别
+ *
+ * @return 当前日志级别
+ */
+log_level_t log_get_level(void);
 
-/* 回调管理函数声明 */
-int log_register_callback(LogCallback callback, void *user_data);
-int log_register_callback_safe(LogCallback callback, void *user_data);
-int log_unregister_callback(LogCallback callback);
-int log_validate_callback(LogCallback callback);
-void log_execute_callbacks_direct(const char *level, const char *message, 
-                                 const char *timestamp);
+/**
+ * @brief 打印日志（内部函数，通过宏调用）
+ *
+ * @param level 日志级别
+ * @param file 源文件名
+ * @param line 行号
+ * @param func 函数名
+ * @param format 格式字符串
+ * @param ... 可变参数
+ * @return 0 成功，-1 失败
+ */
+int log_print(log_level_t level, const char *file, int line, const char *func,
+              const char *format, ...);
 
-/* 异步回调系统函数 */
-int log_init_async_callbacks(void);
-int log_submit_async_callback(const char *level, const char *message, 
-                             const char *timestamp);
-void* log_callback_worker(void *arg);
-void log_stop_async_callbacks(void);
+/**
+ * @brief 打印日志（va_list 版本）
+ *
+ * @param level 日志级别
+ * @param file 源文件名
+ * @param line 行号
+ * @param func 函数名
+ * @param format 格式字符串
+ * @param args 可变参数列表
+ * @return 0 成功，-1 失败
+ */
+int log_vprint(log_level_t level, const char *file, int line, const char *func,
+               const char *format, va_list args);
 
-/* 工具函数声明 */
-int log_create_directory(const char *dir);
-int log_create_directory_recursive_safe(const char *dir);
-void log_format_timestamp(char *buffer, size_t size, const char *format);
-void log_handle_error(const char *message, int exit_code);
-void log_handle_error_detailed(const char *function_name, const char *message, 
-                              int exit_code, const char *file, int line);
+/* ==================== 便捷宏 ==================== */
 
-/* 字符串安全函数 */
-char* log_strdup_safe(const char *src);
-int log_copy_arguments_safe(LogInfo *loginfo, int argc, char **argv);
-int log_vsnprintf_safe(char *str, size_t size, const char *format, va_list ap);
+/* 日志打印宏（自动包含文件名、行号、函数名） */
+#define LOG_DEBUG(fmt, ...) \
+    log_print(LOG_LEVEL_DEBUG, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
 
-/* 文件操作安全函数 */
-FILE* log_open_file_stream_safe(const char *file_path);
-void log_build_file_path(char *complete_path, size_t size, 
-                        const char *fold_name, const char *file_name, 
-                        const char *timestamp);
+#define LOG_INFO(fmt, ...) \
+    log_print(LOG_LEVEL_INFO, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
 
-/* 系统信息函数 */
-const char* log_get_random_header_message(void);
-int log_get_system_info(struct utsname *sys_info);
-void log_format_standard_time(char *buffer, size_t size);
-const char* log_convert_level(const char *mode);
+#define LOG_WARN(fmt, ...) \
+    log_print(LOG_LEVEL_WARN, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
 
-/* 程序控制函数声明 */
-void log_exit_program(int status);
-void log_abort_program(void);
+#define LOG_ERROR(fmt, ...) \
+    log_print(LOG_LEVEL_ERROR, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
 
-/* 验证函数 */
-int log_check_initialization(void);
+#define LOG_FATAL(fmt, ...) \
+    log_print(LOG_LEVEL_FATAL, __FILE__, __LINE__, __func__, fmt, ##__VA_ARGS__)
 
-/* 宏定义简化错误处理 */
-#define LOG_ERROR(message, code) \
-    log_handle_error_detailed(__func__, message, code, __FILE__, __LINE__)
+/* 条件日志宏（检查日志级别） */
+#define LOG_LEVEL_ENABLED(level) ((g_log_ctx != NULL) && (level) >= g_log_ctx->config.level)
 
-#define LOG_ERROR_IF(condition, message, code) \
-    do { \
-        if (condition) { \
-            log_handle_error_detailed(__func__, message, code, __FILE__, __LINE__); \
-        } \
-    } while(0)
+#define LOG_DEBUG_IF(fmt, ...) \
+    do { if (LOG_LEVEL_ENABLED(LOG_LEVEL_DEBUG)) \
+         LOG_DEBUG(fmt, ##__VA_ARGS__); } while(0)
+
+#define LOG_INFO_IF(fmt, ...) \
+    do { if (LOG_LEVEL_ENABLED(LOG_LEVEL_INFO)) \
+         LOG_INFO(fmt, ##__VA_ARGS__); } while(0)
+
+#define LOG_WARN_IF(fmt, ...) \
+    do { if (LOG_LEVEL_ENABLED(LOG_LEVEL_WARN)) \
+         LOG_WARN(fmt, ##__VA_ARGS__); } while(0)
+
+#define LOG_ERROR_IF(fmt, ...) \
+    do { if (LOG_LEVEL_ENABLED(LOG_LEVEL_ERROR)) \
+         LOG_ERROR(fmt, ##__VA_ARGS__); } while(0)
+
+#define LOG_FATAL_IF(fmt, ...) \
+    do { if (LOG_LEVEL_ENABLED(LOG_LEVEL_FATAL)) \
+         LOG_FATAL(fmt, ##__VA_ARGS__); } while(0)
+
+/* 向后兼容的旧接口标志位 */
+#define LOG_SIGN_FILE      0x01  /**< 输出到文件 */
+#define LOG_SIGN_STDOUT    0x02  /**< 输出到标准输出 */
+#define LOG_SIGN_STDERR    0x04  /**< 输出到标准错误 */
+#define LOG_SIGN_ASYNC     0x08  /**< 启用异步模式 */
+#define LOG_SIGN_TIMESTAMP 0x10  /**< 显示时间戳 */
+#define LOG_SIGN_THREAD    0x20  /**< 显示线程ID */
+#define LOG_SIGN_LEVEL     0x40  /**< 显示日志级别 */
+#define LOG_SIGN_FILELINE  0x80  /**< 显示文件名和行号 */
+#define LOG_SIGN_COLOR     0x100 /**< 启用颜色输出 */
+
+/* 向后兼容的旧接口（已废弃） */
+int loginit(const char *dirfile_foramt, int log_loudou, int logsign, int argc, char **argv);
+int logprint(int logsign, char *format, ...);
+int logexit(int status);
 
 #ifdef __cplusplus
 }

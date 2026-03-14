@@ -16,25 +16,46 @@
  */
 
 #include "../include/logio.h"
+#include <stdlib.h>
+#include <string.h>
 
-/* 全局变量定义 */
-clock_t start = 0;                              /**< 程序开始时间戳 */
-clock_t end = 0;                                /**< 程序结束时间戳 */
-atomic_int logentry = 0;                        /**< 原子日志条目计数器 */
-FILE *stream = NULL;                            /**< 日志文件流指针 */
-pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER; /**< 线程互斥锁 */
-LogInfo global_log_info = {0};                  /**< 全局日志信息结构 */
-atomic_int if_write_head = 0;                   /**< 原子日志头写入标志 */
-atomic_int if_write_end = 0;                    /**< 原子日志尾写入标志 */
-CallbackInfo callbacks[MAX_CALLBACKS] = {0};    /**< 回调函数数组 */
-atomic_int callback_count = 0;                  /**< 原子回调数量 */
+/* 全局日志上下文 */
+log_context_t *g_log_ctx = NULL;
 
-/* 异步回调系统变量 */
-AsyncCallbackTask *callback_queue = NULL;       /**< 回调任务队列 */
-atomic_int queue_size = 0;                      /**< 队列当前大小 */
-atomic_int queue_capacity = 0;                  /**< 队列容量 */
-pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER; /**< 队列互斥锁 */
-pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER; /**< 队列条件变量 */
-atomic_int callback_thread_running = 0;         /**< 回调线程运行标志 */
-pthread_t callback_thread_id = 0;               /**< 回调线程ID */
-atomic_int log_initialized = 0;                 /**< 日志系统初始化标志 */
+/* 默认日志配置 */
+const log_config_t default_config = {
+    .level = LOG_LEVEL_INFO,
+    .outputs = LOG_OUTPUT_FILE | LOG_OUTPUT_STDOUT,
+    .async_mode = false,
+    .show_timestamp = true,
+    .show_thread_id = true,
+    .show_level = true,
+    .show_file_line = true,
+    .enable_color = true,
+    .buffer_size = LOG_BUFFER_SIZE,
+    .max_file_size = 0,
+    .max_backup_files = 5
+};
+
+/* 日志级别字符串映射 */
+const char *log_level_strings[] = {
+    "DEBUG",
+    "INFO",
+    "WARN",
+    "ERROR",
+    "FATAL"
+};
+
+/* 日志级别颜色映射（终端用） */
+const char *log_level_colors[] = {
+    "\x1b[36m",  /* CYAN for DEBUG */
+    "\x1b[32m",  /* GREEN for INFO */
+    "\x1b[33m",  /* YELLOW for WARN */
+    "\x1b[31m",  /* RED for ERROR */
+    "\x1b[35m"   /* MAGENTA for FATAL */
+};
+
+const char *LOG_COLOR_RESET = "\x1b[0m";
+
+/* 向后兼容的全局变量（已废弃） */
+FILE *stream = NULL;
