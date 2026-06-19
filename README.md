@@ -1,288 +1,344 @@
-# LogIO - High Performance C Logging Library
+# LogIO - High Performance Asynchronous C Logging Library
 
 <div align="center">
-  <img src="image/icon.png" alt="LogIO Icon" width="200">
-  
-  ![License](https://img.shields.io/badge/license-GPLv3-blue.svg)
-  ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Android%20%7C%20Termux-success.svg)
-  ![Version](https://img.shields.io/badge/version-1.0.0-orange.svg)
+  <img src="../image/icon.png" alt="LogIO Icon" width="200">
 
-**A Simple, Powerful Logging Library for C Applications**
+  ![License](https://img.shields.io/badge/license-GPLv3-blue.svg)
+  ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Android%20%7C%20Termux%20%7C%20MacOS%20%7C%20Windows-success.svg)
+  ![Version](https://img.shields.io/badge/version-3.0.0-orange.svg)
+  ![Standard](https://img.shields.io/badge/C-99-blue)
+
+  **Thread‑safe, Async, Multi‑output, Production‑ready**
 </div>
 
-## 📖 Project Overview
+## 🌍 Language
+## 🌍 语言
+English | [简体中文](README/README_zh-CN.md) | [Français](README/README_fr.md) | [Deutsch](README/README_de.md) | [日本語](README/README_ja.md) | [Русский](README/README_ru.md)
+## 📖 Overview
 
-LogIO is a lightweight, high-performance logging library for C, designed for applications that require reliable logging capabilities. It offers modern features like thread safety, multiple output support, and callback mechanisms while maintaining a clean API design.
+LogIO is a modern, production‑grade logging library for C.  
+It provides **asynchronous writes**, **automatic file rolling**, **JSON structured logs**, **multiple output targets** and a **zero‑cost compile‑time switch** – all behind a simple, easy‑to‑integrate API.
 
-## ✨ Key Features
+Key highlights:
 
-- 🚀 **High Performance** - Optimized logging output with minimal performance overhead
-- 🔒 **Thread Safe** - Built-in mutex protection for multi-threaded environments
-- 📁 **Automatic File Management** - Automatically creates log directories and timestamped files
-- 🔔 **Callback Support** - Integration support for WebSocket and other external systems
-- 📊 **Runtime Statistics** - Automatic recording of runtime, log entry counts, and other statistics
-- 🎯 **Multiple Log Levels** - INFO, WARN, ERROR, FATAL, and more
-- 👀 **Dual Output Modes** - Support for both console and file output, either simultaneously or separately
-- 🛠 **Easy Integration** - Simple API design for quick adoption
+- 🔀 **Fully asynchronous** – Background thread collects and writes log messages, no I/O stalls on the caller.
+- 🔒 **Thread‑safe** – All internal state protected by a mutex; safe to call from any number of threads.
+- 📁 **Automatic file management** – Creates directory trees automatically, supports timestamped filenames (`%Y-%M-%D_%h:%m:%s.log`).
+- 📊 **Structured logging** – Optional JSON output with proper escaping, ready for ingestion by ELK / Loki.
+- 🎨 **Console colours** – Optional ANSI colour output when writing to a terminal.
+- 🔄 **Rolling** – By file size or time interval, seamlessly switches to a new file.
+- 🎯 **Granular level control** – DEBUG, INFO, WARN, ERROR; compile‑time level filtering possible.
+- 🔌 **Extensible** – Register callbacks or additional `FILE*` streams for custom sinks (WebSocket, UDP, etc.).
+- ⚡ **Zero‑cost disable** – Set `LOG_ENABLED` and all logging code is completely removed at compile time.
+
+---
+
+## ✨ Feature Matrix
+
+| Feature             | Description                                                                 |
+|---------------------|-----------------------------------------------------------------------------|
+| Async I/O           | Queue + dedicated writer thread, non‑blocking `LogPrintf`                   |
+| Thread Safety       | Mutex‑protected queue and state, condition variable for efficient wake‑ups  |
+| File Rolling        | Size‑based (e.g., 10 MB) or time‑based (e.g., every hour) with auto‑rename  |
+| Multi‑output        | File, `FILE*` streams, user‑defined callbacks simultaneously                |
+| JSON Logging        | `LogPrintfJSON` emits `{"level":"INFO","time":"...","msg":"..."}` lines     |
+| Color Output        | Terminal‑aware ANSI colours for DEBUG / WARN / ERROR                        |
+| Compile‑time Switch | `#define LOG_ENABLED 0` totally eliminates logging binary footprint         |
+| Callback Hooks      | Receive every log line for custom processing (monitoring, forwarding)       |
+
+---
 
 ## 🚀 Quick Start
 
 ### Requirements
 
-- C Compiler (GCC/Clang)
-- POSIX-compatible system (Linux, Android, Termux)
-- pthread library
+- C99 compiler (GCC or Clang)
+- POSIX threads (`pthread`)
+- CMake ≥ 3.5 (or plain Make)
 
-### Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/Lemonade-NingYou/logio.git
-cd logio
-
-# Compile and install
-make
-sudo make install
-```
-
-### Basic Usage
+### Minimal Example
 
 ```c
-#include <stdio.h>
+#include "logio.h"
 #include <stdlib.h>
-#include <logio.h>
 
-int main(int argc, char **argv) 
-{
-    // Initialize logging system
-    LogInitParams params = {
-        .timeformat = "%Y-%m-%d_%H-%M-%S",
-        .FoldName = "logs",
-        .filename = "application",
-        .program_name = "MyApp",
-        .version = "1.0.0",
-        .argc = argc,
-        .argv = argv
-    };
-
-    LogInfo loginfo = log_initialize(params);
-
-    // Log messages at different levels
-    log_print_message(VISIBLE, "i", "Application started successfully\n");
-    log_print_message(VISIBLE, "w", "Configuration file not found, using defaults\n");
-    log_print_message(VISIBLE, "e", "Database connection failed: %s\n", "Connection timeout");
-    
-    // Debug information (file only)
-    log_print_message(INVISIBLE, "i", "Debug info: UserID=%d\n", 12345);
-    // Exit program gracefully
-    log_exit_program(EXIT_SUCCESS);
-}
-```
-
-## 📚 API Documentation
-
-### Core Functions
-
-#### `log_initialize`
-```c
-LogInfo log_initialize(LogInitParams params);
-```
-Initializes the logging system. Must be called before any other logging functions.
-
-**Parameters:**
-- `params`: Initialization parameter structure containing folder name, file name format, etc.
-
-**Returns:**
-- `LogInfo`: Initialized log information structure
-
-#### `log_print_message`
-```c
-void log_print_message(int visible, const char *level, const char *fmt, ...);
-```
-Records a log message.
-
-**Parameters:**
-- `visible`: `VISIBLE` (console and file) or `INVISIBLE` (file only)
-- `level`: Log level ("i"=INFO, "w"=WARN, "e"=ERROR, "f"=FATAL)
-- `fmt`: Format string (similar to printf)
-- `...`: Variable arguments
-
-#### `log_exit_program`
-```c
-void log_exit_program(int status);
-```
-Safely exits the program, automatically writing log footer information.
-
-**Parameters:**
-- `status`: Exit status code
-
-### Callback Functionality
-
-```c
-// Callback function example
-void my_callback(const char *level, const char *message, 
-                const char *timestamp, void *user_data) {
-    // Send to WebSocket or other systems
-    printf("[Callback] %s %s: %s\n", timestamp, level, message);
-}
-
-// Register callback
-log_register_callback(my_callback, NULL);
-```
-
-## 🎯 Advanced Usage
-
-### Custom Log Headers
-
-The logging system automatically generates detailed log headers with system information, startup parameters, and more:
-
-```
-============================================================
-= Application log- ./myapp
-= Version number: 1.0.0
-= Operating Environment: Linux 5.15.0 (x86_64)
-= Startup parameters:
-    0: ./myapp
-    1: --verbose
-    2: --config=app.conf
-= Start time: 2024-01-15 14:30:25
-= Happy birthday! If today is your birthday
-============================================================
-```
-
-### Multi-threaded Usage
-
-```c
-#include <pthread.h>
-
-void* worker_thread(void* arg) {
-    log_print_message(VISIBLE, "i", "Worker thread %ld started\n", (long)arg);
-    // ... work code
-    log_print_message(VISIBLE, "i", "Worker thread %ld completed\n", (long)arg);
-    return NULL;
-}
-
-int main() {
-    // Initialize logging...
-    
-    pthread_t threads[5];
-    for (int i = 0; i < 5; i++) {
-        pthread_create(&threads[i], NULL, worker_thread, (void*)(long)i);
+int main(void) {
+    // 1. Initialize – creates ./logs/app_2026-06-19_14:30:00.log automatically
+    if (InitLog("./logs/app_%Y-%M-%D_%h:%m:%s.log", LOG_LEVEL_DEBUG) != 0) {
+        return 1;
     }
-    
-    for (int i = 0; i < 5; i++) {
-        pthread_join(threads[i], NULL);
-    }
-    
-    log_exit_program(EXIT_SUCCESS);
+
+    // 2. Also print to console with colours
+    LogAddOutputStream(stdout, 1);
+
+    // 3. Write text logs
+    LogPrintf(LOG_LEVEL_INFO, "Server started on port %d", 8080);
+    LogPrintf(LOG_LEVEL_DEBUG, "Config value: x=%d", 42);
+
+    // 4. Write structured JSON log
+    LogPrintfJSON(LOG_LEVEL_INFO, "User admin login");
+
+    // 5. Enable size‑based rolling (every 5 MB)
+    LogSetRolling(LOG_ROLL_SIZE, 5, 0);
+
+    // 6. Ensure all messages are flushed before exit
+    LogFlush();
+    return 0;
 }
 ```
+
+Compile & run:
+```bash
+gcc -std=c99 -pthread -o example example.c logio.c
+./example
+```
+
+After execution you'll find:
+```
+logs/
+└── app_2026-06-19_14:30:00.log
+```
+and the terminal will show coloured log lines.
+
+---
+
+## 📚 API Reference
+
+### Initialization
+
+```c
+int InitLog(const char *logFilePath, LogLevel level);
+```
+- `logFilePath`: Path containing a time‑format pattern, e.g. `"./logs/%Y-%M-%D.log"`  
+  Supported specifiers: `%Y`, `%M`, `%D`, `%h`, `%m`, `%s`, `%%`  
+  `%N` expands to the default pattern `%Y-%M-%D_%h:%m:%s`
+- `level`: Messages below this threshold are discarded.  
+  `LOG_LEVEL_DEBUG` (0) → `INFO` (1) → `WARN` (2) → `ERROR` (3)
+- Returns `0` on success, `-1` on failure (falls back to stderr).
+
+### Text Logging
+
+```c
+void LogPrintf(LogLevel level, const char *fmt, ...);
+```
+Format identical to `printf`. A header `[LEVEL/TIMESTAMP]` is automatically prepended.
+
+### JSON Logging
+
+```c
+void LogPrintfJSON(LogLevel level, const char *fmt, ...);
+```
+Output is a single JSON line:
+```json
+{"level":"INFO","time":"2026-06-19 14:30:00","msg":"your message"}
+```
+The message is properly escaped. Sinks (file, stream, callback) receive the JSON line.
+
+### Multiple Outputs
+
+```c
+int LogAddOutputStream(FILE *stream, int enable_color);
+```
+Adds a stream sink (e.g., `stdout`, `stderr`). If `enable_color` is non‑zero and the stream is a terminal, ANSI colours are used.  
+Returns an output ID (≥0), or -1 on failure.
+
+```c
+int LogAddCallback(LogCallback cb, void *userdata);
+```
+Registers a callback that receives each log message.
+
+```c
+typedef void (*LogCallback)(LogLevel level, const char *message,
+                            time_t timestamp, int is_json, void *userdata);
+```
+- `level` – original log level
+- `message` – text content (JSON‑escaped if `is_json`)
+- `timestamp` – Unix timestamp of the log event
+- `is_json` – non‑zero if the message originates from `LogPrintfJSON`
+- `userdata` – pointer provided at registration
+
+```c
+int LogRemoveOutput(int id);
+```
+Removes a previously added output. Returns 0 on success.
+
+### File Rolling
+
+```c
+void LogSetRolling(LogRollMode mode, long max_size_mb, int time_interval_sec);
+```
+- `LOG_ROLL_NONE` – no rolling (default)
+- `LOG_ROLL_SIZE` – roll when file exceeds `max_size_mb` MB
+- `LOG_ROLL_TIME` – roll every `time_interval_sec` seconds
+
+On roll, the current file is renamed with a timestamp suffix and a new file is opened.
+
+### Flushing
+
+```c
+void LogFlush(void);
+```
+Blocks until the asynchronous queue is empty and all data is physically written. Useful before program exit or after critical operations.
+
+### Compile‑time Switch
+
+Define `LOG_ENABLED` *before* including `logio.h`:
+
+```c
+#define LOG_ENABLED
+#include "logio.h"
+```
+All log macros become no‑ops, and no logging code is compiled. This is ideal for release builds where you want zero overhead.
+
+---
+
+## 🧵 Advanced Patterns
+
+### Callback Example – Forwarding to WebSocket
+
+```c
+void ws_forward(LogLevel level, const char *msg, time_t ts, int is_json, void *ws) {
+    if (is_json) {
+        websocket_send(ws, msg);          // already JSON
+    } else {
+        // Convert to JSON
+        char buf[512];
+        snprintf(buf, sizeof(buf),
+                 "{\"level\":%d,\"time\":%lld,\"msg\":\"%s\"}",
+                 level, (long long)ts, msg);
+        websocket_send(ws, buf);
+    }
+}
+
+// In main:
+void *ws_conn = websocket_connect("ws://logserver:9000");
+LogAddCallback(ws_forward, ws_conn);
+```
+
+### Time‑based Rolling
+
+```c
+// Roll every hour
+LogSetRolling(LOG_ROLL_TIME, 0, 3600);
+```
+
+### Full Logging Disable in Release
+
+In your build system:
+```bash
+gcc -DLOG_ENABLED=0 -std=c99 -o release_app main.c logio.c
+```
+Now all `LogPrintf` etc. vanish completely – no performance penalty, no binary size increase.
+
+---
 
 ## 📁 Project Structure
 
 ```
 logio/
 ├── include/
-│   └── logio.h          # Main header file
+│   └── logio.h          # Public API header
 ├── src/
-│   ├── loginit.c        # Initialization functions
-│   ├── logprint.c       # Log output functions
-│   ├── logexit.c        # Exit handling functions
-│   ├── logcallback.c    # Callback management functions
-│   └── logdefine.c      # Global variable definitions
+│   └── logio.c          # Implementation (all in one file for easy embedding)
 ├── examples/
-│   └── example.c        # Usage examples
-├── tests/
-│   └── test_logio.c     # Test code
-├── Makefile             # Build configuration
-└── README.md           # Project documentation
+│   └── example.c        # Full demo with multiple outputs and rolling
+├── CMakeLists.txt       # CMake build (optional)
+├── Makefile             # Simple Makefile
+└── README.md
 ```
 
-## 🌍 Supported Platforms
+---
 
-- ✅ **GNU/Linux** - Fully supported
-- ✅ **Android** - Supported via NDK
-- ✅ **Termux** - Fully supported
-- 🔄 **Windows** - Planned support (requires Cygwin/MSYS2)
-- 🔄 **macOS** - Planned support
+## 🔧 Build & Install
 
-## 🔧 Build Options
+### Manual Compilation
 
-### Basic Build
 ```bash
-make
+# Build shared library
+gcc -shared -fPIC -o liblogio.so logio.c -lpthread
+
+# Build and link statically
+gcc -std=c99 -c logio.c
+ar rcs liblogio.a logio.o
 ```
 
-### Debug Mode
-```bash
-make DEBUG=1
+### CMake
+
+```cmake
+add_library(logio logio.c)
+target_link_libraries(logio PUBLIC pthread)
 ```
 
-### Static Library
+### Makefile (provided)
+
 ```bash
-make static
+make           # builds static and shared libraries
+make examples  # compiles example.c
+make test      # runs basic tests
+make install   # installs headers and libraries to /usr/local
 ```
 
-### Clean Build
-```bash
-make clean
-```
+---
 
-### Installation
-```bash
-sudo make install
-```
+## 🌍 Compatibility
+
+| Platform         | Status       | Notes                       |
+|------------------|--------------|-----------------------------|
+| Linux (x86/ARM)  | ✅ Full      | GCC/Clang, glibc/musl       |
+| Android (NDK)    | ✅ Full      | Requires pthread            |
+| Termux           | ✅ Full      | Same as Linux               |
+| macOS            | ⚠️ Works     | With `pthread` (built‑in)   |
+| Windows (MinGW)  | ⚠️ Partial   | Needs `pthread‑win32` library |
+
+---
 
 ## 🐛 Troubleshooting
 
-### Common Issues
+**Error: `undefined reference to pthread_create`**  
+Link with `-lpthread` at the end of the command:
+```bash
+gcc ... -lpthread
+```
 
-1. **Compilation Error: pthread not found**
-   ```bash
-   # Ensure pthread library is installed
-   sudo apt-get install libc6-dev
-   ```
+**Can't create log directory**  
+Ensure the parent directory exists or use a path where the process has write permission. `InitLog` creates intermediate directories automatically, but root ownership may block it.
 
-2. **Permission Error: Cannot create log directory**
-   ```bash
-   # Ensure program has write permissions
-   chmod +x your_program
-   ```
+**Logs are not appearing immediately**  
+LogIO uses an async queue. Call `LogFlush()` to force immediate write, or exit cleanly (the `atexit` handler will flush).
 
-3. **Memory Leak Detection**
-   ```bash
-   # Check with Valgrind
-   valgrind --leak-check=full ./your_program
-   ```
+**`vsnprintf` not declared**  
+Use `-std=c99` (or `-D_POSIX_C_SOURCE=200112L`) to enable POSIX extensions.
+
+---
 
 ## 🤝 Contributing
 
-We welcome community contributions! Please follow these steps:
+Pull requests are welcome! Please follow the existing code style and add tests for new features.
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
+1. Fork the project
+2. Create your feature branch (`git checkout -b feature/amazing`)
+3. Commit your changes (`git commit -am 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing`)
 5. Open a Pull Request
+
+---
 
 ## 📄 License
 
-This project is licensed under the [GPLv3](LICENSE) License. See the LICENSE file for details.
+This project is licensed under the **GNU General Public License v3.0** – see [LICENSE](LICENSE) for details.
 
-## 👥 Author
+---
+
+## 👤 Author
 
 **Lemonade NingYou**  
-📧 Email: lemonade_ningyou@126.com  
-💻 GitHub: [@Lemonade-NingYou](https://github.com/Lemonade-NingYou)
-
-## 🙏 Acknowledgments
-
-Thanks to all developers who have contributed to this project!
+📧 lemonade_ningyou@126.com  
+💻 [GitHub](https://github.com/Lemonade-NingYou)
 
 ---
 
 <div align="center">
   
-**If this project helps you, please give us a ⭐️!**
+**If this library helps you, give it a ⭐️!**
 
 </div>
