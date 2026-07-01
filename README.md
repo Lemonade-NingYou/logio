@@ -1,7 +1,7 @@
 # LogIO - High Performance Asynchronous C Logging Library
 
 <div align="center">
-  <img src="../image/icon.png" alt="LogIO Icon" width="200">
+  <img src="image/icon.png" alt="LogIO Icon" width="200">
 
   ![License](https://img.shields.io/badge/license-GPLv3-blue.svg)
   ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Android%20%7C%20Termux%20%7C%20MacOS%20%7C%20Windows-success.svg)
