@@ -42,7 +42,7 @@ Key highlights:
 | Multi‑output        | File, `FILE*` streams, user‑defined callbacks simultaneously                |
 | JSON Logging        | `LogPrintfJSON` emits `{"level":"INFO","time":"...","msg":"..."}` lines     |
 | Color Output        | Terminal‑aware ANSI colours for DEBUG / WARN / ERROR                        |
-| Compile‑time Switch | `#define LOG_ENABLED 0` totally eliminates logging binary footprint         |
+| Compile‑time Switch | `#define LOG_ENABLED` totally eliminates logging binary footprint         |
 | Callback Hooks      | Receive every log line for custom processing (monitoring, forwarding)       |
 
 ---
