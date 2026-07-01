@@ -12,7 +12,6 @@
 </div>
 
 ## 🌍 Language
-## 🌍 语言
 English | [简体中文](README/README_zh-CN.md) | [Français](README/README_fr.md) | [Deutsch](README/README_de.md) | [日本語](README/README_ja.md) | [Русский](README/README_ru.md)
 ## 📖 Overview
 
